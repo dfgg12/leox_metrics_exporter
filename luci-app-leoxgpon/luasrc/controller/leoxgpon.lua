@@ -2,7 +2,7 @@ module("luci.controller.leoxgpon", package.seeall)
 
 function index()
 	entry({"admin", "status", "leoxgpon"},
-		view("leoxgpon/status"), _("GPON Status"), 90)
+		template("leoxgpon/status"), _("GPON Status"), 90)
 	entry({"admin", "status", "leoxgpon", "data"},
 		call("action_data")).leaf = true
 end
