@@ -6,7 +6,6 @@ import logging
 import re
 import signal
 import sqlite3
-import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -34,8 +33,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("leoxgpon")
 
-_cache: dict[str, Any] = {}
-_cache_lock = threading.Lock()
+# Serializes scrapes - prevents hammering ONT with concurrent requests
+_scrape_lock = threading.Lock()
+_running = True
 
 
 def fetch(path: str) -> BeautifulSoup | None:
@@ -127,19 +127,14 @@ def scrape_pon_status() -> dict[str, Any]:
     soup = fetch("status_pon.asp")
     if not soup:
         return {}
-    temp_raw = _text(soup, "Temperature")
-    volt_raw = _text(soup, "Voltage")
-    tx_raw = _text(soup, "Tx Power")
-    rx_raw = _text(soup, "Rx Power")
-    bias_raw = _text(soup, "Bias Current")
     return {
         "pon_vendor": _text(soup, "Vendor Name"),
         "pon_part_number": _text(soup, "Part Number"),
-        "temperature_c": _float(temp_raw),
-        "voltage_v": _float(volt_raw),
-        "tx_power_dbm": _float(tx_raw),
-        "rx_power_dbm": _float(rx_raw),
-        "bias_current_ma": _float(bias_raw),
+        "temperature_c": _float(_text(soup, "Temperature")),
+        "voltage_v": _float(_text(soup, "Voltage")),
+        "tx_power_dbm": _float(_text(soup, "Tx Power")),
+        "rx_power_dbm": _float(_text(soup, "Rx Power")),
+        "bias_current_ma": _float(_text(soup, "Bias Current")),
         "onu_state": _text(soup, "ONU State"),
         "onu_id": _text(soup, "ONU ID"),
         "loid_status": _text(soup, "LOID Status"),
@@ -175,8 +170,7 @@ def scrape_interface_stats() -> dict[str, Any]:
     soup = fetch("stats.asp")
     if not soup:
         return {}
-    rows = soup.find_all("tr")
-    for row in rows:
+    for row in soup.find_all("tr"):
         cells = row.find_all("td")
         if cells and cells[0].get_text(strip=True).upper() == "LAN":
             vals = [c.get_text(strip=True) for c in cells]
@@ -205,10 +199,7 @@ def scrape_gpon() -> dict[str, Any]:
                 serial = td.get_text(strip=True)
     loid_input = soup.find("input", {"name": "fmgpon_loid"})
     loid = loid_input["value"] if loid_input else ""
-    return {
-        "gpon_serial": serial,
-        "gpon_loid": loid,
-    }
+    return {"gpon_serial": serial, "gpon_loid": loid}
 
 
 def scrape_arp() -> list[dict[str, str]]:
@@ -236,8 +227,7 @@ def collect_all() -> dict[str, Any]:
     metrics.update(scrape_pon_stats())
     metrics.update(scrape_interface_stats())
     metrics.update(scrape_gpon())
-    uptime_raw = metrics.get("uptime_raw", "")
-    metrics["uptime_seconds"] = _uptime_seconds(uptime_raw)
+    metrics["uptime_seconds"] = _uptime_seconds(metrics.get("uptime_raw", ""))
     metrics["arp_table"] = scrape_arp()
     return metrics
 
@@ -371,7 +361,7 @@ def db_insert(conn: sqlite3.Connection, metrics: dict[str, Any]) -> int:
     return row_id
 
 
-# --- Renderers (return string, no I/O) ---
+# --- Renderers ---
 
 def render_json(metrics: dict[str, Any]) -> str:
     """Render metrics as pretty-printed JSON string."""
@@ -393,9 +383,8 @@ def render_prometheus(metrics: dict[str, Any]) -> str:
     """Render Prometheus text exposition format string."""
     device = metrics.get("device_name", "leoxgpon")
     lbl = {"device": device}
-    ts_comment = f"# scraped {metrics.get('timestamp', '')}"
     lines = [
-        ts_comment,
+        f"# scraped {metrics.get('timestamp', '')}",
         "# HELP leoxgpon_cpu_usage_pct CPU utilization percent",
         "# TYPE leoxgpon_cpu_usage_pct gauge",
         _prom_gauge("cpu_usage_pct", metrics.get("cpu_usage_pct"), lbl),
@@ -491,7 +480,6 @@ def render_zabbix(metrics: dict[str, Any]) -> str:
     """Render Zabbix sender JSON format string."""
     host = metrics.get("device_name") or "leoxgpon"
     ts = int(datetime.now(timezone.utc).timestamp())
-
     key_map = {
         "cpu_usage_pct": "leoxgpon.cpu.usage",
         "memory_usage_pct": "leoxgpon.memory.usage",
@@ -528,42 +516,27 @@ def render_zabbix(metrics: dict[str, Any]) -> str:
         "lan_rx_drop": "leoxgpon.lan.rx_drops",
         "lan_tx_drop": "leoxgpon.lan.tx_drops",
     }
-
-    data = []
-    for metric_key, zabbix_key in key_map.items():
-        val = metrics.get(metric_key)
-        if val is not None:
-            data.append({
-                "host": host,
-                "key": zabbix_key,
-                "value": str(val),
-                "clock": ts,
-            })
-
+    data = [
+        {"host": host, "key": zk, "value": str(metrics[mk]), "clock": ts}
+        for mk, zk in key_map.items()
+        if metrics.get(mk) is not None
+    ]
     return json.dumps({"request": "sender data", "data": data}, indent=2)
 
 
-# --- File exporters (write rendered output to disk) ---
+# --- File exporters ---
 
-def export_json(metrics: dict[str, Any]) -> None:
-    """Write metrics as pretty JSON to disk."""
+def export_files(metrics: dict[str, Any]) -> None:
+    """Write all three export formats to disk."""
     JSON_PATH.write_text(render_json(metrics), encoding="utf-8")
-
-
-def export_prometheus(metrics: dict[str, Any]) -> None:
-    """Write Prometheus text exposition format to disk."""
     PROM_PATH.write_text(render_prometheus(metrics), encoding="utf-8")
-
-
-def export_zabbix(metrics: dict[str, Any]) -> None:
-    """Write Zabbix sender JSON to disk."""
     ZABBIX_PATH.write_text(render_zabbix(metrics), encoding="utf-8")
 
 
-# --- HTTP server ---
+# --- HTTP server (live scrape per request) ---
 
 class _MetricsHandler(BaseHTTPRequestHandler):
-    """Serve cached metrics over HTTP."""
+    """Scrape ONT live on every request and serve result."""
 
     _routes: dict[str, tuple[str, str]] = {
         "/metrics": ("text/plain; version=0.0.4; charset=utf-8", "prometheus"),
@@ -579,19 +552,16 @@ class _MetricsHandler(BaseHTTPRequestHandler):
         if path not in self._routes:
             self._respond(404, "text/plain", b"not found\n")
             return
-        with _cache_lock:
-            snapshot = dict(_cache)
-        if not snapshot:
-            self._respond(503, "text/plain", b"no data yet\n")
-            return
         content_type, fmt = self._routes[path]
+        with _scrape_lock:
+            metrics = collect_all()
         match fmt:
             case "prometheus":
-                body = render_prometheus(snapshot).encode()
+                body = render_prometheus(metrics).encode()
             case "json":
-                body = render_json(snapshot).encode()
+                body = render_json(metrics).encode()
             case "zabbix":
-                body = render_zabbix(snapshot).encode()
+                body = render_zabbix(metrics).encode()
             case _:
                 body = b""
         self._respond(200, content_type, body)
@@ -610,16 +580,36 @@ class _MetricsHandler(BaseHTTPRequestHandler):
 def start_http_server(host: str, port: int) -> HTTPServer:
     """Start HTTP metrics server in a daemon thread, return server instance."""
     server = HTTPServer((host, port), _MetricsHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     log.info("http metrics server listening on %s:%d", host or "0.0.0.0", port)
     return server
 
 
-# --- Main loop ---
+# --- DB interval thread ---
 
-_running = True
+def _db_loop(conn: sqlite3.Connection, interval: int, write_files: bool) -> None:
+    """Periodically scrape and persist to DB (and optionally disk)."""
+    while _running:
+        try:
+            with _scrape_lock:
+                metrics = collect_all()
+            db_insert(conn, metrics)
+            if write_files:
+                export_files(metrics)
+            cpu = metrics.get("cpu_usage_pct")
+            mem = metrics.get("memory_usage_pct")
+            rx = metrics.get("rx_power_dbm")
+            tx = metrics.get("tx_power_dbm")
+            log.info("db dump: cpu=%s%% mem=%s%% rx=%sdBm tx=%sdBm", cpu, mem, rx, tx)
+        except Exception as exc:
+            log.error("db loop error: %s", exc)
+        for _ in range(interval):
+            if not _running:
+                break
+            time.sleep(1)
 
+
+# --- Signal handling ---
 
 def _handle_signal(signum: int, _frame: Any) -> None:
     global _running
@@ -627,36 +617,14 @@ def _handle_signal(signum: int, _frame: Any) -> None:
     _running = False
 
 
-def run_once(conn: sqlite3.Connection, write_files: bool = True) -> dict[str, Any]:
-    """Single collection+export cycle."""
-    log.info("collecting metrics")
-    metrics = collect_all()
-    db_insert(conn, metrics)
-    with _cache_lock:
-        _cache.clear()
-        _cache.update(metrics)
-    if write_files:
-        export_json(metrics)
-        export_prometheus(metrics)
-        export_zabbix(metrics)
-    cpu = metrics.get("cpu_usage_pct")
-    mem = metrics.get("memory_usage_pct")
-    rx = metrics.get("rx_power_dbm")
-    tx = metrics.get("tx_power_dbm")
-    log.info("cpu=%s%% mem=%s%% rx_power=%sdBm tx_power=%sdBm", cpu, mem, rx, tx)
-    return metrics
-
+# --- Entry point ---
 
 def main() -> None:
-    """Entry point: parse args, run collection loop."""
+    """Entry point: parse args, start HTTP server and optional DB loop."""
     parser = argparse.ArgumentParser(description="LeoX GPON scraper service")
     parser.add_argument(
         "--interval", type=int, default=60,
-        help="collection interval in seconds (default: 60)",
-    )
-    parser.add_argument(
-        "--once", action="store_true",
-        help="collect once and exit",
+        help="DB dump interval in seconds (default: 60)",
     )
     parser.add_argument(
         "--port", type=int, default=9101,
@@ -667,43 +635,43 @@ def main() -> None:
         help="HTTP server bind address (default: all interfaces)",
     )
     parser.add_argument(
+        "--no-db", action="store_true",
+        help="disable SQLite persistence and interval scraping",
+    )
+    parser.add_argument(
         "--no-files", action="store_true",
-        help="skip writing metrics to disk (rely on HTTP only)",
+        help="skip writing metric files to disk on each DB dump",
     )
     args = parser.parse_args()
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    conn = sqlite3.connect(DB_PATH)
-    db_init(conn)
-
-    write_files = not args.no_files
-
     if args.port:
         start_http_server(args.host, args.port)
 
-    if args.once:
-        run_once(conn, write_files=write_files)
-        conn.close()
-        return
+    conn: sqlite3.Connection | None = None
+    db_thread: threading.Thread | None = None
 
-    log.info("starting scraper loop, interval=%ds", args.interval)
+    if not args.no_db:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(DB_PATH)
+        db_init(conn)
+        db_thread = threading.Thread(
+            target=_db_loop,
+            args=(conn, args.interval, not args.no_files),
+            daemon=True,
+        )
+        db_thread.start()
+        log.info("db loop started, interval=%ds", args.interval)
+
     while _running:
-        try:
-            run_once(conn, write_files=write_files)
-        except Exception as exc:
-            log.error("collection error: %s", exc)
-        if not _running:
-            break
-        for _ in range(args.interval):
-            if not _running:
-                break
-            time.sleep(1)
+        time.sleep(1)
 
-    conn.close()
+    if db_thread is not None:
+        db_thread.join(timeout=5)
+    if conn is not None:
+        conn.close()
     log.info("scraper stopped")
 
 
