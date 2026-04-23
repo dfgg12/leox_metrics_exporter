@@ -35,7 +35,7 @@ log = logging.getLogger("leoxgpon")
 
 # Serializes scrapes - prevents hammering ONT with concurrent requests
 _scrape_lock = threading.Lock()
-_running = True
+_STOP_EVENT = threading.Event()
 
 
 def fetch(path: str) -> BeautifulSoup | None:
@@ -544,7 +544,8 @@ class _MetricsHandler(BaseHTTPRequestHandler):
         "/zabbix.json": ("application/json", "zabbix"),
     }
 
-    def do_GET(self) -> None:
+    def do_GET(self) -> None:  # pylint: disable=invalid-name
+        """Handle GET requests and return metrics in the requested format."""
         path = self.path.split("?", 1)[0]
         if path == "/health":
             self._respond(200, "text/plain", b"ok\n")
@@ -573,8 +574,8 @@ class _MetricsHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, fmt: str, *args: Any) -> None:
-        log.debug("http %s", fmt % args)
+    def log_message(self, format: str, *args: Any) -> None:  # pylint: disable=redefined-builtin
+        log.debug("http %s", format % args)
 
 
 def start_http_server(host: str, port: int) -> HTTPServer:
@@ -591,7 +592,7 @@ def _db_loop(interval: int, write_files: bool) -> None:
     """Periodically scrape and persist to DB (and optionally disk)."""
     conn = sqlite3.connect(DB_PATH)
     db_init(conn)
-    while _running:
+    while not _STOP_EVENT.is_set():
         try:
             with _scrape_lock:
                 metrics = collect_all()
@@ -603,21 +604,17 @@ def _db_loop(interval: int, write_files: bool) -> None:
             rx = metrics.get("rx_power_dbm")
             tx = metrics.get("tx_power_dbm")
             log.info("db dump: cpu=%s%% mem=%s%% rx=%sdBm tx=%sdBm", cpu, mem, rx, tx)
-        except Exception as exc:
+        except (OSError, ValueError, sqlite3.Error) as exc:
             log.error("db loop error: %s", exc)
-        for _ in range(interval):
-            if not _running:
-                break
-            time.sleep(1)
+        _STOP_EVENT.wait(timeout=interval)
     conn.close()
 
 
 # --- Signal handling ---
 
 def _handle_signal(signum: int, _frame: Any) -> None:
-    global _running
     log.info("signal %d received, stopping", signum)
-    _running = False
+    _STOP_EVENT.set()
 
 
 # --- Entry point ---
