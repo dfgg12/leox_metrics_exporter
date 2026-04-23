@@ -68,11 +68,11 @@ def _int(val: str) -> int | None:
 
 
 def scrape_status() -> dict[str, Any]:
-    """Scrape device status: uptime, CPU, memory, LAN info."""
+    """Scrape device status: uptime, CPU, memory, LAN, WAN info."""
     soup = fetch("status.asp")
     if not soup:
         return {}
-    return {
+    result: dict[str, Any] = {
         "device_name": _text(soup, "Device Name"),
         "uptime_raw": _text(soup, "Uptime"),
         "firmware_version": _text(soup, "Firmware Version"),
@@ -81,7 +81,23 @@ def scrape_status() -> dict[str, Any]:
         "lan_ip": _text(soup, "IP Address"),
         "lan_subnet": _text(soup, "Subnet Mask"),
         "lan_mac": _text(soup, "MAC Address"),
+        "name_servers": _text(soup, "Name Servers"),
+        "ipv4_default_gw": _text(soup, "IPv4 Default Gateway"),
+        "ipv6_default_gw": _text(soup, "IPv6 Default Gateway"),
     }
+    # WAN table: Interface | VLAN ID | Connection Type | Protocol | IP Address | Gateway | Status
+    for row in soup.find_all("tr"):
+        cells = [td.get_text(strip=True) for td in row.find_all("td")]
+        if len(cells) >= 7 and cells[0] and cells[0] not in ("LAN",):
+            result["wan_interface"] = cells[0]
+            result["wan_vlan_id"] = _int(cells[1])
+            result["wan_conn_type"] = cells[2]
+            result["wan_protocol"] = cells[3]
+            result["wan_ip"] = cells[4]
+            result["wan_gateway"] = cells[5]
+            result["wan_status"] = cells[6]
+            break
+    return result
 
 
 def _uptime_seconds(raw: str) -> int | None:
@@ -268,7 +284,17 @@ CREATE TABLE IF NOT EXISTS metrics (
     lan_tx_err INTEGER,
     lan_tx_drop INTEGER,
     gpon_serial TEXT,
-    gpon_loid TEXT
+    gpon_loid TEXT,
+    name_servers TEXT,
+    ipv4_default_gw TEXT,
+    ipv6_default_gw TEXT,
+    wan_interface TEXT,
+    wan_vlan_id INTEGER,
+    wan_conn_type TEXT,
+    wan_protocol TEXT,
+    wan_ip TEXT,
+    wan_gateway TEXT,
+    wan_status TEXT
 );
 
 CREATE TABLE IF NOT EXISTS arp_table (
@@ -291,12 +317,34 @@ _SCALAR_KEYS = [
     "pon_packets_dropped", "pon_pause_sent", "pon_pause_received",
     "lan_rx_pkt", "lan_rx_err", "lan_rx_drop", "lan_tx_pkt", "lan_tx_err",
     "lan_tx_drop", "gpon_serial", "gpon_loid",
+    "name_servers", "ipv4_default_gw", "ipv6_default_gw",
+    "wan_interface", "wan_vlan_id", "wan_conn_type", "wan_protocol",
+    "wan_ip", "wan_gateway", "wan_status",
+]
+
+
+_MIGRATIONS = [
+    "ALTER TABLE metrics ADD COLUMN name_servers TEXT",
+    "ALTER TABLE metrics ADD COLUMN ipv4_default_gw TEXT",
+    "ALTER TABLE metrics ADD COLUMN ipv6_default_gw TEXT",
+    "ALTER TABLE metrics ADD COLUMN wan_interface TEXT",
+    "ALTER TABLE metrics ADD COLUMN wan_vlan_id INTEGER",
+    "ALTER TABLE metrics ADD COLUMN wan_conn_type TEXT",
+    "ALTER TABLE metrics ADD COLUMN wan_protocol TEXT",
+    "ALTER TABLE metrics ADD COLUMN wan_ip TEXT",
+    "ALTER TABLE metrics ADD COLUMN wan_gateway TEXT",
+    "ALTER TABLE metrics ADD COLUMN wan_status TEXT",
 ]
 
 
 def db_init(conn: sqlite3.Connection) -> None:
-    """Initialize DB schema."""
+    """Initialize DB schema and apply any pending migrations."""
     conn.executescript(_DDL)
+    for stmt in _MIGRATIONS:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # column already exists
     conn.commit()
 
 
@@ -380,6 +428,30 @@ def export_prometheus(metrics: dict[str, Any]) -> None:
         "# HELP leoxgpon_pon_packets_received_total PON packets received",
         "# TYPE leoxgpon_pon_packets_received_total counter",
         _prom_gauge("pon_packets_received_total", metrics.get("pon_packets_received"), lbl),
+        "# HELP leoxgpon_pon_unicast_sent_total PON unicast packets transmitted",
+        "# TYPE leoxgpon_pon_unicast_sent_total counter",
+        _prom_gauge("pon_unicast_sent_total", metrics.get("pon_unicast_sent"), lbl),
+        "# HELP leoxgpon_pon_unicast_received_total PON unicast packets received",
+        "# TYPE leoxgpon_pon_unicast_received_total counter",
+        _prom_gauge("pon_unicast_received_total", metrics.get("pon_unicast_received"), lbl),
+        "# HELP leoxgpon_pon_multicast_sent_total PON multicast packets transmitted",
+        "# TYPE leoxgpon_pon_multicast_sent_total counter",
+        _prom_gauge("pon_multicast_sent_total", metrics.get("pon_multicast_sent"), lbl),
+        "# HELP leoxgpon_pon_multicast_received_total PON multicast packets received",
+        "# TYPE leoxgpon_pon_multicast_received_total counter",
+        _prom_gauge("pon_multicast_received_total", metrics.get("pon_multicast_received"), lbl),
+        "# HELP leoxgpon_pon_broadcast_sent_total PON broadcast packets transmitted",
+        "# TYPE leoxgpon_pon_broadcast_sent_total counter",
+        _prom_gauge("pon_broadcast_sent_total", metrics.get("pon_broadcast_sent"), lbl),
+        "# HELP leoxgpon_pon_broadcast_received_total PON broadcast packets received",
+        "# TYPE leoxgpon_pon_broadcast_received_total counter",
+        _prom_gauge("pon_broadcast_received_total", metrics.get("pon_broadcast_received"), lbl),
+        "# HELP leoxgpon_pon_pause_sent_total PON pause frames transmitted",
+        "# TYPE leoxgpon_pon_pause_sent_total counter",
+        _prom_gauge("pon_pause_sent_total", metrics.get("pon_pause_sent"), lbl),
+        "# HELP leoxgpon_pon_pause_received_total PON pause frames received",
+        "# TYPE leoxgpon_pon_pause_received_total counter",
+        _prom_gauge("pon_pause_received_total", metrics.get("pon_pause_received"), lbl),
         "# HELP leoxgpon_pon_fec_errors_total PON FEC errors",
         "# TYPE leoxgpon_pon_fec_errors_total counter",
         _prom_gauge("pon_fec_errors_total", metrics.get("pon_fec_errors"), lbl),
@@ -432,9 +504,20 @@ def export_zabbix(metrics: dict[str, Any]) -> None:
         "pon_bytes_received": "leoxgpon.pon.bytes_received",
         "pon_packets_sent": "leoxgpon.pon.packets_sent",
         "pon_packets_received": "leoxgpon.pon.packets_received",
+        "pon_unicast_sent": "leoxgpon.pon.unicast_sent",
+        "pon_unicast_received": "leoxgpon.pon.unicast_received",
+        "pon_multicast_sent": "leoxgpon.pon.multicast_sent",
+        "pon_multicast_received": "leoxgpon.pon.multicast_received",
+        "pon_broadcast_sent": "leoxgpon.pon.broadcast_sent",
+        "pon_broadcast_received": "leoxgpon.pon.broadcast_received",
+        "pon_pause_sent": "leoxgpon.pon.pause_sent",
+        "pon_pause_received": "leoxgpon.pon.pause_received",
         "pon_fec_errors": "leoxgpon.pon.fec_errors",
         "pon_hec_errors": "leoxgpon.pon.hec_errors",
         "pon_packets_dropped": "leoxgpon.pon.packets_dropped",
+        "wan_status": "leoxgpon.wan.status",
+        "wan_ip": "leoxgpon.wan.ip",
+        "wan_vlan_id": "leoxgpon.wan.vlan_id",
         "lan_rx_pkt": "leoxgpon.lan.rx_packets",
         "lan_tx_pkt": "leoxgpon.lan.tx_packets",
         "lan_rx_err": "leoxgpon.lan.rx_errors",
