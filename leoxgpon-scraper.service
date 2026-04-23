@@ -1,0 +1,15 @@
+[Unit]
+Description=LeoX GPON metrics scraper
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/leoxgpon
+ExecStart=/usr/bin/python3 /root/leoxgpon/scraper.py --interval 60
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
