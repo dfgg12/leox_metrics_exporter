@@ -1,4 +1,4 @@
-"""GPON terminal scraper - collects metrics from LeoX ONT and stores/exports them."""
+"""GPON terminal scraper - collects metrics from LeoX ONT and exports them."""
 
 import argparse
 import json
@@ -7,8 +7,10 @@ import re
 import signal
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 log = logging.getLogger("leoxgpon")
+
+_cache: dict[str, Any] = {}
+_cache_lock = threading.Lock()
 
 
 def fetch(path: str) -> BeautifulSoup | None:
@@ -322,7 +327,6 @@ _SCALAR_KEYS = [
     "wan_ip", "wan_gateway", "wan_status",
 ]
 
-
 _MIGRATIONS = [
     "ALTER TABLE metrics ADD COLUMN name_servers TEXT",
     "ALTER TABLE metrics ADD COLUMN ipv4_default_gw TEXT",
@@ -367,11 +371,11 @@ def db_insert(conn: sqlite3.Connection, metrics: dict[str, Any]) -> int:
     return row_id
 
 
-# --- Exporters ---
+# --- Renderers (return string, no I/O) ---
 
-def export_json(metrics: dict[str, Any]) -> None:
-    """Write metrics as pretty JSON."""
-    JSON_PATH.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+def render_json(metrics: dict[str, Any]) -> str:
+    """Render metrics as pretty-printed JSON string."""
+    return json.dumps(metrics, indent=2)
 
 
 def _prom_gauge(name: str, value: Any, labels: dict[str, str] | None = None) -> str:
@@ -385,8 +389,8 @@ def _prom_gauge(name: str, value: Any, labels: dict[str, str] | None = None) -> 
     return f"leoxgpon_{name}{label_str} {value}"
 
 
-def export_prometheus(metrics: dict[str, Any]) -> None:
-    """Write Prometheus text exposition format."""
+def render_prometheus(metrics: dict[str, Any]) -> str:
+    """Render Prometheus text exposition format string."""
     device = metrics.get("device_name", "leoxgpon")
     lbl = {"device": device}
     ts_comment = f"# scraped {metrics.get('timestamp', '')}"
@@ -480,12 +484,11 @@ def export_prometheus(metrics: dict[str, Any]) -> None:
         "# TYPE leoxgpon_lan_tx_drops_total counter",
         _prom_gauge("lan_tx_drops_total", metrics.get("lan_tx_drop"), lbl),
     ]
-    content = "\n".join(line for line in lines if line) + "\n"
-    PROM_PATH.write_text(content, encoding="utf-8")
+    return "\n".join(line for line in lines if line) + "\n"
 
 
-def export_zabbix(metrics: dict[str, Any]) -> None:
-    """Write Zabbix sender JSON format for use with zabbix_sender."""
+def render_zabbix(metrics: dict[str, Any]) -> str:
+    """Render Zabbix sender JSON format string."""
     host = metrics.get("device_name") or "leoxgpon"
     ts = int(datetime.now(timezone.utc).timestamp())
 
@@ -537,8 +540,80 @@ def export_zabbix(metrics: dict[str, Any]) -> None:
                 "clock": ts,
             })
 
-    payload = {"request": "sender data", "data": data}
-    ZABBIX_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return json.dumps({"request": "sender data", "data": data}, indent=2)
+
+
+# --- File exporters (write rendered output to disk) ---
+
+def export_json(metrics: dict[str, Any]) -> None:
+    """Write metrics as pretty JSON to disk."""
+    JSON_PATH.write_text(render_json(metrics), encoding="utf-8")
+
+
+def export_prometheus(metrics: dict[str, Any]) -> None:
+    """Write Prometheus text exposition format to disk."""
+    PROM_PATH.write_text(render_prometheus(metrics), encoding="utf-8")
+
+
+def export_zabbix(metrics: dict[str, Any]) -> None:
+    """Write Zabbix sender JSON to disk."""
+    ZABBIX_PATH.write_text(render_zabbix(metrics), encoding="utf-8")
+
+
+# --- HTTP server ---
+
+class _MetricsHandler(BaseHTTPRequestHandler):
+    """Serve cached metrics over HTTP."""
+
+    _routes: dict[str, tuple[str, str]] = {
+        "/metrics": ("text/plain; version=0.0.4; charset=utf-8", "prometheus"),
+        "/metrics.json": ("application/json", "json"),
+        "/zabbix.json": ("application/json", "zabbix"),
+    }
+
+    def do_GET(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if path == "/health":
+            self._respond(200, "text/plain", b"ok\n")
+            return
+        if path not in self._routes:
+            self._respond(404, "text/plain", b"not found\n")
+            return
+        with _cache_lock:
+            snapshot = dict(_cache)
+        if not snapshot:
+            self._respond(503, "text/plain", b"no data yet\n")
+            return
+        content_type, fmt = self._routes[path]
+        match fmt:
+            case "prometheus":
+                body = render_prometheus(snapshot).encode()
+            case "json":
+                body = render_json(snapshot).encode()
+            case "zabbix":
+                body = render_zabbix(snapshot).encode()
+            case _:
+                body = b""
+        self._respond(200, content_type, body)
+
+    def _respond(self, code: int, content_type: str, body: bytes) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        log.debug("http %s", fmt % args)
+
+
+def start_http_server(host: str, port: int) -> HTTPServer:
+    """Start HTTP metrics server in a daemon thread, return server instance."""
+    server = HTTPServer((host, port), _MetricsHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    log.info("http metrics server listening on %s:%d", host or "0.0.0.0", port)
+    return server
 
 
 # --- Main loop ---
@@ -552,14 +627,18 @@ def _handle_signal(signum: int, _frame: Any) -> None:
     _running = False
 
 
-def run_once(conn: sqlite3.Connection) -> dict[str, Any]:
+def run_once(conn: sqlite3.Connection, write_files: bool = True) -> dict[str, Any]:
     """Single collection+export cycle."""
     log.info("collecting metrics")
     metrics = collect_all()
     db_insert(conn, metrics)
-    export_json(metrics)
-    export_prometheus(metrics)
-    export_zabbix(metrics)
+    with _cache_lock:
+        _cache.clear()
+        _cache.update(metrics)
+    if write_files:
+        export_json(metrics)
+        export_prometheus(metrics)
+        export_zabbix(metrics)
     cpu = metrics.get("cpu_usage_pct")
     mem = metrics.get("memory_usage_pct")
     rx = metrics.get("rx_power_dbm")
@@ -579,6 +658,18 @@ def main() -> None:
         "--once", action="store_true",
         help="collect once and exit",
     )
+    parser.add_argument(
+        "--port", type=int, default=9101,
+        help="HTTP metrics server port (default: 9101, 0 to disable)",
+    )
+    parser.add_argument(
+        "--host", type=str, default="",
+        help="HTTP server bind address (default: all interfaces)",
+    )
+    parser.add_argument(
+        "--no-files", action="store_true",
+        help="skip writing metrics to disk (rely on HTTP only)",
+    )
     args = parser.parse_args()
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -589,15 +680,20 @@ def main() -> None:
     conn = sqlite3.connect(DB_PATH)
     db_init(conn)
 
+    write_files = not args.no_files
+
+    if args.port:
+        start_http_server(args.host, args.port)
+
     if args.once:
-        run_once(conn)
+        run_once(conn, write_files=write_files)
         conn.close()
         return
 
     log.info("starting scraper loop, interval=%ds", args.interval)
     while _running:
         try:
-            run_once(conn)
+            run_once(conn, write_files=write_files)
         except Exception as exc:
             log.error("collection error: %s", exc)
         if not _running:
