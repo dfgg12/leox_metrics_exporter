@@ -587,8 +587,10 @@ def start_http_server(host: str, port: int) -> HTTPServer:
 
 # --- DB interval thread ---
 
-def _db_loop(conn: sqlite3.Connection, interval: int, write_files: bool) -> None:
+def _db_loop(interval: int, write_files: bool) -> None:
     """Periodically scrape and persist to DB (and optionally disk)."""
+    conn = sqlite3.connect(DB_PATH)
+    db_init(conn)
     while _running:
         try:
             with _scrape_lock:
@@ -607,6 +609,7 @@ def _db_loop(conn: sqlite3.Connection, interval: int, write_files: bool) -> None
             if not _running:
                 break
             time.sleep(1)
+    conn.close()
 
 
 # --- Signal handling ---
@@ -650,16 +653,13 @@ def main() -> None:
     if args.port:
         start_http_server(args.host, args.port)
 
-    conn: sqlite3.Connection | None = None
     db_thread: threading.Thread | None = None
 
     if not args.no_db:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
-        db_init(conn)
         db_thread = threading.Thread(
             target=_db_loop,
-            args=(conn, args.interval, not args.no_files),
+            args=(args.interval, not args.no_files),
             daemon=True,
         )
         db_thread.start()
@@ -670,8 +670,6 @@ def main() -> None:
 
     if db_thread is not None:
         db_thread.join(timeout=5)
-    if conn is not None:
-        conn.close()
     log.info("scraper stopped")
 
 
