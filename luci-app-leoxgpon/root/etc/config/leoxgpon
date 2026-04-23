@@ -1,0 +1,8 @@
+config leoxgpon 'main'
+	option ont_url 'http://192.168.100.1'
+	option ont_user 'leox'
+	option ont_pass 'leolabs_7'
+	option http_port '9101'
+	option http_host '0.0.0.0'
+	option db_interval '60'
+	option db_enabled '1'

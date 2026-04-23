@@ -1,0 +1,340 @@
+<%+header%>
+
+<style>
+#leoxgpon-wrap { max-width: 960px; font-family: monospace; }
+.gpon-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em; }
+.gpon-header h2 { margin: 0; }
+.gpon-ts { color: #888; font-size: 0.85em; }
+.gpon-section { border: 1px solid #ccc; border-radius: 4px; margin-bottom: 1em; }
+.gpon-section h3 { margin: 0; padding: 6px 12px; background: #f0f0f0; border-bottom: 1px solid #ccc;
+                    border-radius: 4px 4px 0 0; font-size: 0.9em; text-transform: uppercase;
+                    letter-spacing: 0.05em; color: #444; }
+.gpon-grid { display: grid; grid-template-columns: 200px 1fr; gap: 2px 12px;
+              padding: 10px 14px; }
+.gpon-label { color: #666; font-size: 0.85em; padding: 2px 0; }
+.gpon-val   { font-size: 0.85em; padding: 2px 0; font-weight: bold; }
+.gpon-bar-wrap { display: flex; align-items: center; gap: 8px; }
+.gpon-bar { background: #e0e0e0; border-radius: 3px; height: 10px; flex: 1; max-width: 160px; overflow: hidden; }
+.gpon-bar-fill { height: 100%; border-radius: 3px; background: #3c8dbc; transition: width 0.4s; }
+.gpon-bar-fill.warn { background: #e08000; }
+.gpon-bar-fill.crit { background: #c0392b; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 3px; font-size: 0.78em;
+          font-weight: bold; text-transform: uppercase; }
+.badge-ok   { background: #27ae60; color: #fff; }
+.badge-warn { background: #e08000; color: #fff; }
+.badge-err  { background: #c0392b; color: #fff; }
+.badge-info { background: #3c8dbc; color: #fff; }
+.gpon-table { width: 100%; border-collapse: collapse; font-size: 0.83em; padding: 0 14px 10px; }
+.gpon-table thead th { text-align: left; border-bottom: 1px solid #ccc; padding: 4px 8px; color: #555; }
+.gpon-table tbody td { padding: 3px 8px; border-bottom: 1px solid #f0f0f0; }
+.gpon-table tbody tr:last-child td { border-bottom: none; }
+.gpon-err { padding: 16px; color: #c0392b; font-weight: bold; }
+#refresh-btn { font-size: 0.8em; cursor: pointer; }
+</style>
+
+<div id="leoxgpon-wrap">
+  <div class="gpon-header">
+    <h2>LeoX GPON Status</h2>
+    <span>
+      <span class="gpon-ts" id="gpon-ts">Loading...</span>
+      &nbsp;
+      <input type="button" id="refresh-btn" value="Refresh now" onclick="gponFetch()" />
+    </span>
+  </div>
+
+  <div id="gpon-err" class="gpon-err" style="display:none"></div>
+
+  <!-- Device section -->
+  <div class="gpon-section" id="sec-device">
+    <h3>Device</h3>
+    <div class="gpon-grid">
+      <span class="gpon-label">Name</span>          <span class="gpon-val" id="g-device_name">-</span>
+      <span class="gpon-label">Firmware</span>      <span class="gpon-val" id="g-firmware_version">-</span>
+      <span class="gpon-label">Uptime</span>        <span class="gpon-val" id="g-uptime_raw">-</span>
+      <span class="gpon-label">CPU</span>
+        <span class="gpon-val">
+          <span class="gpon-bar-wrap">
+            <div class="gpon-bar"><div class="gpon-bar-fill" id="g-cpu-bar" style="width:0%"></div></div>
+            <span id="g-cpu_usage_pct">-</span>%
+          </span>
+        </span>
+      <span class="gpon-label">Memory</span>
+        <span class="gpon-val">
+          <span class="gpon-bar-wrap">
+            <div class="gpon-bar"><div class="gpon-bar-fill" id="g-mem-bar" style="width:0%"></div></div>
+            <span id="g-memory_usage_pct">-</span>%
+          </span>
+        </span>
+    </div>
+  </div>
+
+  <!-- WAN section -->
+  <div class="gpon-section" id="sec-wan">
+    <h3>WAN</h3>
+    <div class="gpon-grid">
+      <span class="gpon-label">Status</span>        <span class="gpon-val" id="g-wan_status_badge">-</span>
+      <span class="gpon-label">Interface</span>     <span class="gpon-val" id="g-wan_interface">-</span>
+      <span class="gpon-label">VLAN ID</span>       <span class="gpon-val" id="g-wan_vlan_id">-</span>
+      <span class="gpon-label">Protocol</span>      <span class="gpon-val" id="g-wan_protocol">-</span>
+      <span class="gpon-label">IP Address</span>    <span class="gpon-val" id="g-wan_ip">-</span>
+      <span class="gpon-label">Gateway</span>       <span class="gpon-val" id="g-wan_gateway">-</span>
+      <span class="gpon-label">DNS</span>           <span class="gpon-val" id="g-name_servers">-</span>
+    </div>
+  </div>
+
+  <!-- PON Optical section -->
+  <div class="gpon-section" id="sec-pon">
+    <h3>PON Optical</h3>
+    <div class="gpon-grid">
+      <span class="gpon-label">ONU State</span>     <span class="gpon-val" id="g-onu_state_badge">-</span>
+      <span class="gpon-label">ONU ID</span>        <span class="gpon-val" id="g-onu_id">-</span>
+      <span class="gpon-label">LOID Status</span>   <span class="gpon-val" id="g-loid_status">-</span>
+      <span class="gpon-label">Serial</span>        <span class="gpon-val" id="g-gpon_serial">-</span>
+      <span class="gpon-label">Vendor</span>        <span class="gpon-val" id="g-pon_vendor">-</span>
+      <span class="gpon-label">Part Number</span>   <span class="gpon-val" id="g-pon_part_number">-</span>
+      <span class="gpon-label">Temperature</span>   <span class="gpon-val"><span id="g-temperature_c">-</span> &deg;C</span>
+      <span class="gpon-label">Voltage</span>       <span class="gpon-val"><span id="g-voltage_v">-</span> V</span>
+      <span class="gpon-label">TX Power</span>      <span class="gpon-val"><span id="g-tx_power_dbm">-</span> dBm</span>
+      <span class="gpon-label">RX Power</span>      <span class="gpon-val"><span id="g-rx_power_dbm">-</span> dBm</span>
+      <span class="gpon-label">Bias Current</span>  <span class="gpon-val"><span id="g-bias_current_ma">-</span> mA</span>
+    </div>
+  </div>
+
+  <!-- LAN section -->
+  <div class="gpon-section" id="sec-lan">
+    <h3>LAN</h3>
+    <div class="gpon-grid">
+      <span class="gpon-label">IP Address</span>    <span class="gpon-val" id="g-lan_ip">-</span>
+      <span class="gpon-label">Subnet</span>        <span class="gpon-val" id="g-lan_subnet">-</span>
+      <span class="gpon-label">MAC</span>           <span class="gpon-val" id="g-lan_mac">-</span>
+      <span class="gpon-label">RX Packets</span>    <span class="gpon-val" id="g-lan_rx_pkt">-</span>
+      <span class="gpon-label">TX Packets</span>    <span class="gpon-val" id="g-lan_tx_pkt">-</span>
+      <span class="gpon-label">RX Errors</span>     <span class="gpon-val" id="g-lan_rx_err">-</span>
+      <span class="gpon-label">TX Errors</span>     <span class="gpon-val" id="g-lan_tx_err">-</span>
+      <span class="gpon-label">RX Drops</span>      <span class="gpon-val" id="g-lan_rx_drop">-</span>
+      <span class="gpon-label">TX Drops</span>      <span class="gpon-val" id="g-lan_tx_drop">-</span>
+    </div>
+  </div>
+
+  <!-- PON Counters section -->
+  <div class="gpon-section" id="sec-ctr">
+    <h3>PON Counters</h3>
+    <table class="gpon-table">
+      <thead><tr><th>Counter</th><th>Sent</th><th>Received</th></tr></thead>
+      <tbody>
+        <tr><td>Bytes</td>
+            <td id="g-pon_bytes_sent">-</td>
+            <td id="g-pon_bytes_received">-</td></tr>
+        <tr><td>Packets</td>
+            <td id="g-pon_packets_sent">-</td>
+            <td id="g-pon_packets_received">-</td></tr>
+        <tr><td>Unicast</td>
+            <td id="g-pon_unicast_sent">-</td>
+            <td id="g-pon_unicast_received">-</td></tr>
+        <tr><td>Multicast</td>
+            <td id="g-pon_multicast_sent">-</td>
+            <td id="g-pon_multicast_received">-</td></tr>
+        <tr><td>Broadcast</td>
+            <td id="g-pon_broadcast_sent">-</td>
+            <td id="g-pon_broadcast_received">-</td></tr>
+        <tr><td>Pause</td>
+            <td id="g-pon_pause_sent">-</td>
+            <td id="g-pon_pause_received">-</td></tr>
+      </tbody>
+    </table>
+    <div class="gpon-grid">
+      <span class="gpon-label">FEC Errors</span>    <span class="gpon-val" id="g-pon_fec_errors">-</span>
+      <span class="gpon-label">HEC Errors</span>    <span class="gpon-val" id="g-pon_hec_errors">-</span>
+      <span class="gpon-label">Dropped</span>       <span class="gpon-val" id="g-pon_packets_dropped">-</span>
+    </div>
+  </div>
+
+  <!-- ARP Table section -->
+  <div class="gpon-section" id="sec-arp">
+    <h3>ARP Table</h3>
+    <table class="gpon-table" id="g-arp-table">
+      <thead><tr><th>IP Address</th><th>MAC Address</th></tr></thead>
+      <tbody id="g-arp-body"><tr><td colspan="2">Loading...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function() {
+  "use strict";
+
+  var POLL_MS = 30000;
+  var DATA_URL = "<%=luci.dispatcher.build_url("admin","status","leoxgpon","data")%>";
+  var _timer = null;
+
+  function fmtNum(v) {
+    if (v === null || v === undefined) return "-";
+    if (typeof v === "number" && v >= 1000) {
+      return v.toLocaleString();
+    }
+    return String(v);
+  }
+
+  function setText(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = (val !== null && val !== undefined && val !== "") ? fmtNum(val) : "-";
+  }
+
+  function setBar(id, pct) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var p = Math.min(100, Math.max(0, pct || 0));
+    el.style.width = p + "%";
+    el.className = "gpon-bar-fill" + (p >= 90 ? " crit" : p >= 70 ? " warn" : "");
+  }
+
+  function badge(text, cls) {
+    return '<span class="badge badge-' + cls + '">' + (text || "-") + '</span>';
+  }
+
+  function setHTML(id, html) {
+    var el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  }
+
+  function wanBadge(status) {
+    if (!status) return badge("unknown", "warn");
+    var s = status.toLowerCase();
+    if (s === "connected" || s === "up")   return badge(status, "ok");
+    if (s === "disconnected" || s === "down") return badge(status, "err");
+    return badge(status, "warn");
+  }
+
+  function onuBadge(state) {
+    if (!state) return badge("unknown", "warn");
+    var s = state.toLowerCase();
+    if (s.indexOf("o5") !== -1 || s.indexOf("operational") !== -1) return badge(state, "ok");
+    if (s.indexOf("o1") !== -1 || s.indexOf("init") !== -1)        return badge(state, "info");
+    return badge(state, "warn");
+  }
+
+  function fmtTimestamp(ts) {
+    if (!ts) return "";
+    try {
+      var d = new Date(ts);
+      return "Updated " + d.toLocaleTimeString();
+    } catch(e) { return ts; }
+  }
+
+  function applyData(d) {
+    setText("g-device_name",       d.device_name);
+    setText("g-firmware_version",  d.firmware_version);
+    setText("g-uptime_raw",        d.uptime_raw);
+    setText("g-cpu_usage_pct",     d.cpu_usage_pct);
+    setText("g-memory_usage_pct",  d.memory_usage_pct);
+    setBar("g-cpu-bar",            d.cpu_usage_pct);
+    setBar("g-mem-bar",            d.memory_usage_pct);
+
+    setHTML("g-wan_status_badge",  wanBadge(d.wan_status));
+    setText("g-wan_interface",     d.wan_interface);
+    setText("g-wan_vlan_id",       d.wan_vlan_id);
+    setText("g-wan_protocol",      d.wan_protocol);
+    setText("g-wan_ip",            d.wan_ip);
+    setText("g-wan_gateway",       d.wan_gateway);
+    setText("g-name_servers",      d.name_servers);
+
+    setHTML("g-onu_state_badge",   onuBadge(d.onu_state));
+    setText("g-onu_id",            d.onu_id);
+    setText("g-loid_status",       d.loid_status);
+    setText("g-gpon_serial",       d.gpon_serial);
+    setText("g-pon_vendor",        d.pon_vendor);
+    setText("g-pon_part_number",   d.pon_part_number);
+    setText("g-temperature_c",     d.temperature_c);
+    setText("g-voltage_v",         d.voltage_v);
+    setText("g-tx_power_dbm",      d.tx_power_dbm);
+    setText("g-rx_power_dbm",      d.rx_power_dbm);
+    setText("g-bias_current_ma",   d.bias_current_ma);
+
+    setText("g-lan_ip",            d.lan_ip);
+    setText("g-lan_subnet",        d.lan_subnet);
+    setText("g-lan_mac",           d.lan_mac);
+    setText("g-lan_rx_pkt",        d.lan_rx_pkt);
+    setText("g-lan_tx_pkt",        d.lan_tx_pkt);
+    setText("g-lan_rx_err",        d.lan_rx_err);
+    setText("g-lan_tx_err",        d.lan_tx_err);
+    setText("g-lan_rx_drop",       d.lan_rx_drop);
+    setText("g-lan_tx_drop",       d.lan_tx_drop);
+
+    setText("g-pon_bytes_sent",        d.pon_bytes_sent);
+    setText("g-pon_bytes_received",    d.pon_bytes_received);
+    setText("g-pon_packets_sent",      d.pon_packets_sent);
+    setText("g-pon_packets_received",  d.pon_packets_received);
+    setText("g-pon_unicast_sent",      d.pon_unicast_sent);
+    setText("g-pon_unicast_received",  d.pon_unicast_received);
+    setText("g-pon_multicast_sent",    d.pon_multicast_sent);
+    setText("g-pon_multicast_received",d.pon_multicast_received);
+    setText("g-pon_broadcast_sent",    d.pon_broadcast_sent);
+    setText("g-pon_broadcast_received",d.pon_broadcast_received);
+    setText("g-pon_pause_sent",        d.pon_pause_sent);
+    setText("g-pon_pause_received",    d.pon_pause_received);
+    setText("g-pon_fec_errors",        d.pon_fec_errors);
+    setText("g-pon_hec_errors",        d.pon_hec_errors);
+    setText("g-pon_packets_dropped",   d.pon_packets_dropped);
+
+    var arpBody = document.getElementById("g-arp-body");
+    if (arpBody) {
+      var arp = d.arp_table || [];
+      if (arp.length === 0) {
+        arpBody.innerHTML = "<tr><td colspan='2'>-</td></tr>";
+      } else {
+        arpBody.innerHTML = arp.map(function(e) {
+          return "<tr><td>" + (e.ip || "") + "</td><td>" + (e.mac || "") + "</td></tr>";
+        }).join("");
+      }
+    }
+
+    var tsEl = document.getElementById("gpon-ts");
+    if (tsEl) tsEl.textContent = fmtTimestamp(d.timestamp);
+
+    var errEl = document.getElementById("gpon-err");
+    if (errEl) errEl.style.display = "none";
+  }
+
+  function showError(msg) {
+    var errEl = document.getElementById("gpon-err");
+    if (errEl) {
+      errEl.textContent = "Error: " + msg;
+      errEl.style.display = "";
+    }
+    var tsEl = document.getElementById("gpon-ts");
+    if (tsEl) tsEl.textContent = "Fetch failed";
+  }
+
+  function gponFetch() {
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", DATA_URL, true);
+    xhr.timeout = 12000;
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState !== 4) return;
+      if (xhr.status === 200) {
+        try {
+          var d = JSON.parse(xhr.responseText);
+          if (d.error) {
+            showError(d.error);
+          } else {
+            applyData(d);
+          }
+        } catch(e) {
+          showError("Invalid JSON response");
+        }
+      } else {
+        showError("HTTP " + xhr.status);
+      }
+    };
+    xhr.ontimeout = function() { showError("Request timed out"); };
+    xhr.send();
+  }
+
+  window.gponFetch = gponFetch;
+
+  gponFetch();
+  _timer = setInterval(gponFetch, POLL_MS);
+})();
+</script>
+
+<%+footer%>
