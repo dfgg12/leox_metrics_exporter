@@ -4,8 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/leoxgpon
-ExecStart=/usr/bin/python3 /root/leoxgpon/scraper.py --interval 60 --port 9101
+WorkingDirectory=/opt/leoxgpon
+ExecStart=/usr/bin/python3 /opt/leoxgpon/scraper.py \
+    --interval 60 \
+    --port 9101 \
+    --db /var/lib/leoxgpon/leoxgpon.db \
+    --no-files
 Restart=always
 RestartSec=10
 StandardOutput=journal

@@ -1,5 +1,15 @@
 <%+header%>
 
+<style type="text/css">
+  .gpon-table { width: 100%; }
+  .gpon-table td, .gpon-table th {
+    padding: 4px 8px;
+    text-align: left;
+    vertical-align: middle;
+  }
+  .gpon-table td:first-child, .gpon-table th:first-child { width: 220px; }
+</style>
+
 <div class="cbi-map">
 
   <div class="cbi-map-title">
@@ -18,28 +28,25 @@
   <fieldset class="cbi-section">
     <legend>Device</legend>
     <div class="cbi-section-node">
-      <div class="table">
-        <div class="tr"><div class="td left" style="width:220px">Name</div>
-                        <div class="td left" id="g-device_name">-</div></div>
-        <div class="tr"><div class="td left">Firmware</div>
-                        <div class="td left" id="g-firmware_version">-</div></div>
-        <div class="tr"><div class="td left">Uptime</div>
-                        <div class="td left" id="g-uptime_raw">-</div></div>
-        <div class="tr"><div class="td left">CPU</div>
-                        <div class="td left">
-                          <div class="progress" style="width:140px;margin:2px 0;display:inline-block;vertical-align:middle">
-                            <div class="progress-bar" id="g-cpu-bar" style="width:0%"></div>
-                          </div>
-                          &nbsp;<span id="g-cpu_usage_pct">-</span>%
-                        </div></div>
-        <div class="tr"><div class="td left">Memory</div>
-                        <div class="td left">
-                          <div class="progress" style="width:140px;margin:2px 0;display:inline-block;vertical-align:middle">
-                            <div class="progress-bar" id="g-mem-bar" style="width:0%"></div>
-                          </div>
-                          &nbsp;<span id="g-memory_usage_pct">-</span>%
-                        </div></div>
-      </div>
+      <table class="table gpon-table">
+        <tr><td>Name</td><td id="g-device_name">-</td></tr>
+        <tr><td>Firmware</td><td id="g-firmware_version">-</td></tr>
+        <tr><td>Uptime</td><td id="g-uptime_raw">-</td></tr>
+        <tr><td>CPU</td>
+            <td>
+              <div class="progress" style="width:140px;margin:2px 0;display:inline-block;vertical-align:middle">
+                <div class="progress-bar" id="g-cpu-bar" style="width:0%"></div>
+              </div>
+              &nbsp;<span id="g-cpu_usage_pct">-</span>%
+            </td></tr>
+        <tr><td>Memory</td>
+            <td>
+              <div class="progress" style="width:140px;margin:2px 0;display:inline-block;vertical-align:middle">
+                <div class="progress-bar" id="g-mem-bar" style="width:0%"></div>
+              </div>
+              &nbsp;<span id="g-memory_usage_pct">-</span>%
+            </td></tr>
+      </table>
     </div>
   </fieldset>
 
@@ -47,22 +54,15 @@
   <fieldset class="cbi-section">
     <legend>WAN</legend>
     <div class="cbi-section-node">
-      <div class="table">
-        <div class="tr"><div class="td left" style="width:220px">Status</div>
-                        <div class="td left" id="g-wan_status_badge">-</div></div>
-        <div class="tr"><div class="td left">Interface</div>
-                        <div class="td left" id="g-wan_interface">-</div></div>
-        <div class="tr"><div class="td left">VLAN ID</div>
-                        <div class="td left" id="g-wan_vlan_id">-</div></div>
-        <div class="tr"><div class="td left">Protocol</div>
-                        <div class="td left" id="g-wan_protocol">-</div></div>
-        <div class="tr"><div class="td left">IP Address</div>
-                        <div class="td left" id="g-wan_ip">-</div></div>
-        <div class="tr"><div class="td left">Gateway</div>
-                        <div class="td left" id="g-wan_gateway">-</div></div>
-        <div class="tr"><div class="td left">DNS</div>
-                        <div class="td left" id="g-name_servers">-</div></div>
-      </div>
+      <table class="table gpon-table">
+        <tr><td>Status</td><td id="g-wan_status_badge">-</td></tr>
+        <tr><td>Interface</td><td id="g-wan_interface">-</td></tr>
+        <tr><td>VLAN ID</td><td id="g-wan_vlan_id">-</td></tr>
+        <tr><td>Protocol</td><td id="g-wan_protocol">-</td></tr>
+        <tr><td>IP Address</td><td id="g-wan_ip">-</td></tr>
+        <tr><td>Gateway</td><td id="g-wan_gateway">-</td></tr>
+        <tr><td>DNS</td><td id="g-name_servers">-</td></tr>
+      </table>
     </div>
   </fieldset>
 
@@ -70,30 +70,19 @@
   <fieldset class="cbi-section">
     <legend>PON Optical</legend>
     <div class="cbi-section-node">
-      <div class="table">
-        <div class="tr"><div class="td left" style="width:220px">ONU State</div>
-                        <div class="td left" id="g-onu_state_badge">-</div></div>
-        <div class="tr"><div class="td left">ONU ID</div>
-                        <div class="td left" id="g-onu_id">-</div></div>
-        <div class="tr"><div class="td left">LOID Status</div>
-                        <div class="td left" id="g-loid_status">-</div></div>
-        <div class="tr"><div class="td left">Serial</div>
-                        <div class="td left" id="g-gpon_serial">-</div></div>
-        <div class="tr"><div class="td left">Vendor</div>
-                        <div class="td left" id="g-pon_vendor">-</div></div>
-        <div class="tr"><div class="td left">Part Number</div>
-                        <div class="td left" id="g-pon_part_number">-</div></div>
-        <div class="tr"><div class="td left">Temperature</div>
-                        <div class="td left"><span id="g-temperature_c">-</span> &deg;C</div></div>
-        <div class="tr"><div class="td left">Voltage</div>
-                        <div class="td left"><span id="g-voltage_v">-</span> V</div></div>
-        <div class="tr"><div class="td left">TX Power</div>
-                        <div class="td left"><span id="g-tx_power_dbm">-</span> dBm</div></div>
-        <div class="tr"><div class="td left">RX Power</div>
-                        <div class="td left"><span id="g-rx_power_dbm">-</span> dBm</div></div>
-        <div class="tr"><div class="td left">Bias Current</div>
-                        <div class="td left"><span id="g-bias_current_ma">-</span> mA</div></div>
-      </div>
+      <table class="table gpon-table">
+        <tr><td>ONU State</td><td id="g-onu_state_badge">-</td></tr>
+        <tr><td>ONU ID</td><td id="g-onu_id">-</td></tr>
+        <tr><td>LOID Status</td><td id="g-loid_status">-</td></tr>
+        <tr><td>Serial</td><td id="g-gpon_serial">-</td></tr>
+        <tr><td>Vendor</td><td id="g-pon_vendor">-</td></tr>
+        <tr><td>Part Number</td><td id="g-pon_part_number">-</td></tr>
+        <tr><td>Temperature</td><td><span id="g-temperature_c">-</span> &deg;C</td></tr>
+        <tr><td>Voltage</td><td><span id="g-voltage_v">-</span> V</td></tr>
+        <tr><td>TX Power</td><td><span id="g-tx_power_dbm">-</span> dBm</td></tr>
+        <tr><td>RX Power</td><td><span id="g-rx_power_dbm">-</span> dBm</td></tr>
+        <tr><td>Bias Current</td><td><span id="g-bias_current_ma">-</span> mA</td></tr>
+      </table>
     </div>
   </fieldset>
 
@@ -101,26 +90,17 @@
   <fieldset class="cbi-section">
     <legend>LAN</legend>
     <div class="cbi-section-node">
-      <div class="table">
-        <div class="tr"><div class="td left" style="width:220px">IP Address</div>
-                        <div class="td left" id="g-lan_ip">-</div></div>
-        <div class="tr"><div class="td left">Subnet</div>
-                        <div class="td left" id="g-lan_subnet">-</div></div>
-        <div class="tr"><div class="td left">MAC</div>
-                        <div class="td left" id="g-lan_mac">-</div></div>
-        <div class="tr"><div class="td left">RX Packets</div>
-                        <div class="td left" id="g-lan_rx_pkt">-</div></div>
-        <div class="tr"><div class="td left">TX Packets</div>
-                        <div class="td left" id="g-lan_tx_pkt">-</div></div>
-        <div class="tr"><div class="td left">RX Errors</div>
-                        <div class="td left" id="g-lan_rx_err">-</div></div>
-        <div class="tr"><div class="td left">TX Errors</div>
-                        <div class="td left" id="g-lan_tx_err">-</div></div>
-        <div class="tr"><div class="td left">RX Drops</div>
-                        <div class="td left" id="g-lan_rx_drop">-</div></div>
-        <div class="tr"><div class="td left">TX Drops</div>
-                        <div class="td left" id="g-lan_tx_drop">-</div></div>
-      </div>
+      <table class="table gpon-table">
+        <tr><td>IP Address</td><td id="g-lan_ip">-</td></tr>
+        <tr><td>Subnet</td><td id="g-lan_subnet">-</td></tr>
+        <tr><td>MAC</td><td id="g-lan_mac">-</td></tr>
+        <tr><td>RX Packets</td><td id="g-lan_rx_pkt">-</td></tr>
+        <tr><td>TX Packets</td><td id="g-lan_tx_pkt">-</td></tr>
+        <tr><td>RX Errors</td><td id="g-lan_rx_err">-</td></tr>
+        <tr><td>TX Errors</td><td id="g-lan_tx_err">-</td></tr>
+        <tr><td>RX Drops</td><td id="g-lan_rx_drop">-</td></tr>
+        <tr><td>TX Drops</td><td id="g-lan_tx_drop">-</td></tr>
+      </table>
     </div>
   </fieldset>
 
@@ -128,58 +108,56 @@
   <fieldset class="cbi-section">
     <legend>PON Counters</legend>
     <div class="cbi-section-node">
-      <div class="table">
-        <div class="tr cbi-rowstyle-1">
-          <div class="td left" style="width:220px"><strong>Counter</strong></div>
-          <div class="td left"><strong>Sent</strong></div>
-          <div class="td left"><strong>Received</strong></div>
-        </div>
-        <div class="tr cbi-rowstyle-2">
-          <div class="td left">Bytes</div>
-          <div class="td left" id="g-pon_bytes_sent">-</div>
-          <div class="td left" id="g-pon_bytes_received">-</div>
-        </div>
-        <div class="tr cbi-rowstyle-1">
-          <div class="td left">Packets</div>
-          <div class="td left" id="g-pon_packets_sent">-</div>
-          <div class="td left" id="g-pon_packets_received">-</div>
-        </div>
-        <div class="tr cbi-rowstyle-2">
-          <div class="td left">Unicast</div>
-          <div class="td left" id="g-pon_unicast_sent">-</div>
-          <div class="td left" id="g-pon_unicast_received">-</div>
-        </div>
-        <div class="tr cbi-rowstyle-1">
-          <div class="td left">Multicast</div>
-          <div class="td left" id="g-pon_multicast_sent">-</div>
-          <div class="td left" id="g-pon_multicast_received">-</div>
-        </div>
-        <div class="tr cbi-rowstyle-2">
-          <div class="td left">Broadcast</div>
-          <div class="td left" id="g-pon_broadcast_sent">-</div>
-          <div class="td left" id="g-pon_broadcast_received">-</div>
-        </div>
-        <div class="tr cbi-rowstyle-1">
-          <div class="td left">Pause</div>
-          <div class="td left" id="g-pon_pause_sent">-</div>
-          <div class="td left" id="g-pon_pause_received">-</div>
-        </div>
-        <div class="tr cbi-rowstyle-2">
-          <div class="td left">FEC Errors</div>
-          <div class="td left" id="g-pon_fec_errors">-</div>
-          <div class="td left"></div>
-        </div>
-        <div class="tr cbi-rowstyle-1">
-          <div class="td left">HEC Errors</div>
-          <div class="td left" id="g-pon_hec_errors">-</div>
-          <div class="td left"></div>
-        </div>
-        <div class="tr cbi-rowstyle-2">
-          <div class="td left">Dropped</div>
-          <div class="td left" id="g-pon_packets_dropped">-</div>
-          <div class="td left"></div>
-        </div>
-      </div>
+      <table class="table gpon-table">
+        <tr class="cbi-rowstyle-1">
+          <th>Counter</th><th>Sent</th><th>Received</th>
+        </tr>
+        <tr class="cbi-rowstyle-2">
+          <td>Bytes</td>
+          <td id="g-pon_bytes_sent">-</td>
+          <td id="g-pon_bytes_received">-</td>
+        </tr>
+        <tr class="cbi-rowstyle-1">
+          <td>Packets</td>
+          <td id="g-pon_packets_sent">-</td>
+          <td id="g-pon_packets_received">-</td>
+        </tr>
+        <tr class="cbi-rowstyle-2">
+          <td>Unicast</td>
+          <td id="g-pon_unicast_sent">-</td>
+          <td id="g-pon_unicast_received">-</td>
+        </tr>
+        <tr class="cbi-rowstyle-1">
+          <td>Multicast</td>
+          <td id="g-pon_multicast_sent">-</td>
+          <td id="g-pon_multicast_received">-</td>
+        </tr>
+        <tr class="cbi-rowstyle-2">
+          <td>Broadcast</td>
+          <td id="g-pon_broadcast_sent">-</td>
+          <td id="g-pon_broadcast_received">-</td>
+        </tr>
+        <tr class="cbi-rowstyle-1">
+          <td>Pause</td>
+          <td id="g-pon_pause_sent">-</td>
+          <td id="g-pon_pause_received">-</td>
+        </tr>
+        <tr class="cbi-rowstyle-2">
+          <td>FEC Errors</td>
+          <td id="g-pon_fec_errors">-</td>
+          <td></td>
+        </tr>
+        <tr class="cbi-rowstyle-1">
+          <td>HEC Errors</td>
+          <td id="g-pon_hec_errors">-</td>
+          <td></td>
+        </tr>
+        <tr class="cbi-rowstyle-2">
+          <td>Dropped</td>
+          <td id="g-pon_packets_dropped">-</td>
+          <td></td>
+        </tr>
+      </table>
     </div>
   </fieldset>
 
@@ -187,15 +165,16 @@
   <fieldset class="cbi-section">
     <legend>ARP Table</legend>
     <div class="cbi-section-node">
-      <div class="table" id="g-arp-table">
-        <div class="tr cbi-rowstyle-1">
-          <div class="td left" style="width:220px"><strong>IP Address</strong></div>
-          <div class="td left"><strong>MAC Address</strong></div>
-        </div>
-        <div id="g-arp-body">
-          <div class="tr"><div class="td left">Loading...</div></div>
-        </div>
-      </div>
+      <table class="table gpon-table" id="g-arp-table">
+        <thead>
+          <tr class="cbi-rowstyle-1">
+            <th>IP Address</th><th>MAC Address</th>
+          </tr>
+        </thead>
+        <tbody id="g-arp-body">
+          <tr><td>Loading...</td><td></td></tr>
+        </tbody>
+      </table>
     </div>
   </fieldset>
 
@@ -262,6 +241,10 @@
     } catch(e) { return ts; }
   }
 
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
   function applyData(d) {
     setText("g-device_name",       d.device_name);
     setText("g-firmware_version",  d.firmware_version);
@@ -321,14 +304,14 @@
     if (arpBody) {
       var arp = d.arp_table || [];
       if (arp.length === 0) {
-        arpBody.innerHTML = '<div class="tr"><div class="td left">-</div></div>';
+        arpBody.innerHTML = '<tr><td>-</td><td></td></tr>';
       } else {
         arpBody.innerHTML = arp.map(function(e, i) {
           var s = (i % 2 === 0) ? "cbi-rowstyle-2" : "cbi-rowstyle-1";
-          return '<div class="tr ' + s + '">' +
-                 '<div class="td left">' + (e.ip  || "") + '</div>' +
-                 '<div class="td left">' + (e.mac || "") + '</div>' +
-                 '</div>';
+          return '<tr class="' + s + '">' +
+                 '<td>' + esc(e.ip  || "") + '</td>' +
+                 '<td>' + esc(e.mac || "") + '</td>' +
+                 '</tr>';
         }).join("");
       }
     }
