@@ -8,21 +8,28 @@
     vertical-align: middle;
   }
   .gpon-table td:first-child, .gpon-table th:first-child { width: 220px; }
+  .gpon-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .gpon-toolbar #gpon-ts { opacity: 0.6; font-size: 0.9em; }
+  .gpon-table .cbi-progressbar { min-width: 140px; max-width: 300px; }
 </style>
 
 <div class="cbi-map">
 
-  <div class="cbi-map-title">
-    LeoX GPON Status
-    <span style="float:right;font-size:0.8em;font-weight:normal">
-      <span id="gpon-ts" style="color:#888"></span>
-      &nbsp;
-      <input class="cbi-button cbi-button-action" type="button"
-             value="Refresh" onclick="gponFetch()" />
-    </span>
+  <h2 name="content">LeoX GPON Status</h2>
+
+  <div class="gpon-toolbar">
+    <span id="gpon-ts"></span>
+    <input class="cbi-button cbi-button-action" type="button"
+           value="Refresh" onclick="gponFetch()" />
   </div>
 
-  <div id="gpon-err" class="errormark" style="display:none;margin-bottom:1em"></div>
+  <div id="gpon-err" class="alert-message warning" style="display:none"></div>
 
   <!-- Device -->
   <fieldset class="cbi-section">
@@ -33,16 +40,14 @@
         <tr class="cbi-rowstyle-2"><td>Firmware</td><td><span id="g-firmware_version">-</span></td></tr>
         <tr class="cbi-rowstyle-1"><td>Uptime</td><td><span id="g-uptime_raw">-</span></td></tr>
         <tr class="cbi-rowstyle-2"><td>CPU</td><td>
-              <div class="progress" style="width:140px;margin:2px 0;display:inline-block;vertical-align:middle">
-                <div class="progress-bar" id="g-cpu-bar" style="width:0%"></div>
+              <div class="cbi-progressbar" id="g-cpu-bar" title="-">
+                <div></div>
               </div>
-              &nbsp;<span id="g-cpu_usage_pct">-</span>%
             </td></tr>
         <tr class="cbi-rowstyle-1"><td>Memory</td><td>
-              <div class="progress" style="width:140px;margin:2px 0;display:inline-block;vertical-align:middle">
-                <div class="progress-bar" id="g-mem-bar" style="width:0%"></div>
+              <div class="cbi-progressbar" id="g-mem-bar" title="-">
+                <div></div>
               </div>
-              &nbsp;<span id="g-memory_usage_pct">-</span>%
             </td></tr>
       </table>
     </div>
@@ -202,9 +207,15 @@
   function setBar(id, pct) {
     var el = document.getElementById(id);
     if (!el) return;
-    var p = Math.min(100, Math.max(0, pct || 0));
-    el.style.width = p + "%";
-    el.className = "progress-bar" + (p >= 90 ? " progress-bar-danger" : p >= 70 ? " progress-bar-warning" : "");
+    var inner = el.firstElementChild;
+    if (pct === null || pct === undefined) {
+      el.title = "-";
+      if (inner) inner.style.width = "0%";
+      return;
+    }
+    var p = Math.min(100, Math.max(0, pct));
+    el.title = p + "%";
+    if (inner) inner.style.width = p + "%";
   }
 
   function badge(text, cls) {
@@ -247,8 +258,6 @@
     setText("g-device_name",       d.device_name);
     setText("g-firmware_version",  d.firmware_version);
     setText("g-uptime_raw",        d.uptime_raw);
-    setText("g-cpu_usage_pct",     d.cpu_usage_pct);
-    setText("g-memory_usage_pct",  d.memory_usage_pct);
     setBar("g-cpu-bar",            d.cpu_usage_pct);
     setBar("g-mem-bar",            d.memory_usage_pct);
 
