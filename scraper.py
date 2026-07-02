@@ -13,17 +13,19 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import (
+    BaseHTTPRequestHandler,
+    HTTPServer,
+    ThreadingHTTPServer,
+)
 from pathlib import Path
 from typing import Any
 
+# Defaults; overridable via CLI args (set in main()).
 BASE_URL = "http://192.168.100.1"
-ONT_USER = "leox"
-ONT_PASS = "leolabs_7"
 TIMEOUT = 10
 
-DATA_DIR = Path(__file__).parent / "data"
-DB_PATH = DATA_DIR / "leoxgpon.db"
+DEFAULT_DB_PATH = Path(__file__).parent / "data" / "leoxgpon.db"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -138,7 +140,15 @@ def _parse_html(html: str) -> _Node:
 # HTTP fetch (stdlib only)
 # ---------------------------------------------------------------------------
 
-_AUTH_HEADER = "Basic " + base64.b64encode(f"{ONT_USER}:{ONT_PASS}".encode()).decode()
+_AUTH_HEADER = ""
+
+
+def set_ont_config(base_url: str, user: str, password: str) -> None:
+    """Set ONT base URL and basic-auth credentials for fetch()."""
+    global BASE_URL, _AUTH_HEADER
+    BASE_URL = base_url.rstrip("/")
+    creds = base64.b64encode(f"{user}:{password}".encode()).decode()
+    _AUTH_HEADER = "Basic " + creds
 
 
 def fetch(path: str) -> _Node | None:
@@ -174,8 +184,8 @@ def _float(val: str) -> float | None:
 
 
 def _int(val: str) -> int | None:
-    """Extract first integer from string."""
-    m = re.search(r"\d+", val)
+    """Extract first integer (sign-aware) from string."""
+    m = re.search(r"[-+]?\d+", val)
     return int(m.group()) if m else None
 
 
@@ -439,113 +449,86 @@ def render_json(metrics: dict[str, Any]) -> str:
     return json.dumps(metrics, indent=2)
 
 
-def _prom_gauge(name: str, value: Any, labels: dict[str, str] | None = None) -> str:
-    """Format single Prometheus gauge line."""
-    if value is None:
-        return ""
-    label_str = ""
-    if labels:
-        pairs = ",".join(f'{k}="{v}"' for k, v in labels.items())
-        label_str = f"{{{pairs}}}"
-    return f"leoxgpon_{name}{label_str} {value}"
+# (metric_name, source_key, prom_type, help_text)
+_PROM_METRICS: list[tuple[str, str, str, str]] = [
+    ("cpu_usage_pct", "cpu_usage_pct", "gauge",
+     "CPU utilization percent"),
+    ("memory_usage_pct", "memory_usage_pct", "gauge",
+     "Memory utilization percent"),
+    ("uptime_seconds", "uptime_seconds", "counter",
+     "Device uptime in seconds"),
+    ("temperature_celsius", "temperature_c", "gauge",
+     "Optical module temperature"),
+    ("voltage_volts", "voltage_v", "gauge",
+     "Optical module supply voltage"),
+    ("tx_power_dbm", "tx_power_dbm", "gauge",
+     "Optical transmit power dBm"),
+    ("rx_power_dbm", "rx_power_dbm", "gauge",
+     "Optical receive power dBm"),
+    ("bias_current_milliamps", "bias_current_ma", "gauge",
+     "Laser bias current"),
+    ("pon_bytes_sent_total", "pon_bytes_sent", "counter",
+     "PON bytes transmitted"),
+    ("pon_bytes_received_total", "pon_bytes_received", "counter",
+     "PON bytes received"),
+    ("pon_packets_sent_total", "pon_packets_sent", "counter",
+     "PON packets transmitted"),
+    ("pon_packets_received_total", "pon_packets_received", "counter",
+     "PON packets received"),
+    ("pon_unicast_sent_total", "pon_unicast_sent", "counter",
+     "PON unicast packets transmitted"),
+    ("pon_unicast_received_total", "pon_unicast_received", "counter",
+     "PON unicast packets received"),
+    ("pon_multicast_sent_total", "pon_multicast_sent", "counter",
+     "PON multicast packets transmitted"),
+    ("pon_multicast_received_total", "pon_multicast_received", "counter",
+     "PON multicast packets received"),
+    ("pon_broadcast_sent_total", "pon_broadcast_sent", "counter",
+     "PON broadcast packets transmitted"),
+    ("pon_broadcast_received_total", "pon_broadcast_received", "counter",
+     "PON broadcast packets received"),
+    ("pon_pause_sent_total", "pon_pause_sent", "counter",
+     "PON pause frames transmitted"),
+    ("pon_pause_received_total", "pon_pause_received", "counter",
+     "PON pause frames received"),
+    ("pon_fec_errors_total", "pon_fec_errors", "counter",
+     "PON FEC errors"),
+    ("pon_hec_errors_total", "pon_hec_errors", "counter",
+     "PON HEC errors"),
+    ("pon_packets_dropped_total", "pon_packets_dropped", "counter",
+     "PON packets dropped"),
+    ("lan_rx_packets_total", "lan_rx_pkt", "counter",
+     "LAN received packets"),
+    ("lan_tx_packets_total", "lan_tx_pkt", "counter",
+     "LAN transmitted packets"),
+    ("lan_rx_errors_total", "lan_rx_err", "counter",
+     "LAN receive errors"),
+    ("lan_tx_errors_total", "lan_tx_err", "counter",
+     "LAN transmit errors"),
+    ("lan_rx_drops_total", "lan_rx_drop", "counter",
+     "LAN receive drops"),
+    ("lan_tx_drops_total", "lan_tx_drop", "counter",
+     "LAN transmit drops"),
+]
+
+
+def _prom_escape(val: str) -> str:
+    """Escape a Prometheus label value."""
+    return val.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def render_prometheus(metrics: dict[str, Any]) -> str:
     """Render Prometheus text exposition format string."""
-    device = metrics.get("device_name", "leoxgpon")
-    lbl = {"device": device}
-    _g = _prom_gauge
-    lines = [
-        f"# scraped {metrics.get('timestamp', '')}",
-        "# HELP leoxgpon_cpu_usage_pct CPU utilization percent",
-        "# TYPE leoxgpon_cpu_usage_pct gauge",
-        _g("cpu_usage_pct", metrics.get("cpu_usage_pct"), lbl),
-        "# HELP leoxgpon_memory_usage_pct Memory utilization percent",
-        "# TYPE leoxgpon_memory_usage_pct gauge",
-        _g("memory_usage_pct", metrics.get("memory_usage_pct"), lbl),
-        "# HELP leoxgpon_uptime_seconds Device uptime in seconds",
-        "# TYPE leoxgpon_uptime_seconds counter",
-        _g("uptime_seconds", metrics.get("uptime_seconds"), lbl),
-        "# HELP leoxgpon_temperature_celsius Optical module temperature",
-        "# TYPE leoxgpon_temperature_celsius gauge",
-        _g("temperature_celsius", metrics.get("temperature_c"), lbl),
-        "# HELP leoxgpon_voltage_volts Optical module supply voltage",
-        "# TYPE leoxgpon_voltage_volts gauge",
-        _g("voltage_volts", metrics.get("voltage_v"), lbl),
-        "# HELP leoxgpon_tx_power_dbm Optical transmit power dBm",
-        "# TYPE leoxgpon_tx_power_dbm gauge",
-        _g("tx_power_dbm", metrics.get("tx_power_dbm"), lbl),
-        "# HELP leoxgpon_rx_power_dbm Optical receive power dBm",
-        "# TYPE leoxgpon_rx_power_dbm gauge",
-        _g("rx_power_dbm", metrics.get("rx_power_dbm"), lbl),
-        "# HELP leoxgpon_bias_current_milliamps Laser bias current",
-        "# TYPE leoxgpon_bias_current_milliamps gauge",
-        _g("bias_current_milliamps", metrics.get("bias_current_ma"), lbl),
-        "# HELP leoxgpon_pon_bytes_sent_total PON bytes transmitted",
-        "# TYPE leoxgpon_pon_bytes_sent_total counter",
-        _g("pon_bytes_sent_total", metrics.get("pon_bytes_sent"), lbl),
-        "# HELP leoxgpon_pon_bytes_received_total PON bytes received",
-        "# TYPE leoxgpon_pon_bytes_received_total counter",
-        _g("pon_bytes_received_total", metrics.get("pon_bytes_received"), lbl),
-        "# HELP leoxgpon_pon_packets_sent_total PON packets transmitted",
-        "# TYPE leoxgpon_pon_packets_sent_total counter",
-        _g("pon_packets_sent_total", metrics.get("pon_packets_sent"), lbl),
-        "# HELP leoxgpon_pon_packets_received_total PON packets received",
-        "# TYPE leoxgpon_pon_packets_received_total counter",
-        _g("pon_packets_received_total", metrics.get("pon_packets_received"), lbl),
-        "# HELP leoxgpon_pon_unicast_sent_total PON unicast packets transmitted",
-        "# TYPE leoxgpon_pon_unicast_sent_total counter",
-        _g("pon_unicast_sent_total", metrics.get("pon_unicast_sent"), lbl),
-        "# HELP leoxgpon_pon_unicast_received_total PON unicast packets received",
-        "# TYPE leoxgpon_pon_unicast_received_total counter",
-        _g("pon_unicast_received_total", metrics.get("pon_unicast_received"), lbl),
-        "# HELP leoxgpon_pon_multicast_sent_total PON multicast packets transmitted",
-        "# TYPE leoxgpon_pon_multicast_sent_total counter",
-        _g("pon_multicast_sent_total", metrics.get("pon_multicast_sent"), lbl),
-        "# HELP leoxgpon_pon_multicast_received_total PON multicast packets received",
-        "# TYPE leoxgpon_pon_multicast_received_total counter",
-        _g("pon_multicast_received_total", metrics.get("pon_multicast_received"), lbl),
-        "# HELP leoxgpon_pon_broadcast_sent_total PON broadcast packets transmitted",
-        "# TYPE leoxgpon_pon_broadcast_sent_total counter",
-        _g("pon_broadcast_sent_total", metrics.get("pon_broadcast_sent"), lbl),
-        "# HELP leoxgpon_pon_broadcast_received_total PON broadcast packets received",
-        "# TYPE leoxgpon_pon_broadcast_received_total counter",
-        _g("pon_broadcast_received_total", metrics.get("pon_broadcast_received"), lbl),
-        "# HELP leoxgpon_pon_pause_sent_total PON pause frames transmitted",
-        "# TYPE leoxgpon_pon_pause_sent_total counter",
-        _g("pon_pause_sent_total", metrics.get("pon_pause_sent"), lbl),
-        "# HELP leoxgpon_pon_pause_received_total PON pause frames received",
-        "# TYPE leoxgpon_pon_pause_received_total counter",
-        _g("pon_pause_received_total", metrics.get("pon_pause_received"), lbl),
-        "# HELP leoxgpon_pon_fec_errors_total PON FEC errors",
-        "# TYPE leoxgpon_pon_fec_errors_total counter",
-        _g("pon_fec_errors_total", metrics.get("pon_fec_errors"), lbl),
-        "# HELP leoxgpon_pon_hec_errors_total PON HEC errors",
-        "# TYPE leoxgpon_pon_hec_errors_total counter",
-        _g("pon_hec_errors_total", metrics.get("pon_hec_errors"), lbl),
-        "# HELP leoxgpon_pon_packets_dropped_total PON packets dropped",
-        "# TYPE leoxgpon_pon_packets_dropped_total counter",
-        _g("pon_packets_dropped_total", metrics.get("pon_packets_dropped"), lbl),
-        "# HELP leoxgpon_lan_rx_packets_total LAN received packets",
-        "# TYPE leoxgpon_lan_rx_packets_total counter",
-        _g("lan_rx_packets_total", metrics.get("lan_rx_pkt"), lbl),
-        "# HELP leoxgpon_lan_tx_packets_total LAN transmitted packets",
-        "# TYPE leoxgpon_lan_tx_packets_total counter",
-        _g("lan_tx_packets_total", metrics.get("lan_tx_pkt"), lbl),
-        "# HELP leoxgpon_lan_rx_errors_total LAN receive errors",
-        "# TYPE leoxgpon_lan_rx_errors_total counter",
-        _g("lan_rx_errors_total", metrics.get("lan_rx_err"), lbl),
-        "# HELP leoxgpon_lan_tx_errors_total LAN transmit errors",
-        "# TYPE leoxgpon_lan_tx_errors_total counter",
-        _g("lan_tx_errors_total", metrics.get("lan_tx_err"), lbl),
-        "# HELP leoxgpon_lan_rx_drops_total LAN receive drops",
-        "# TYPE leoxgpon_lan_rx_drops_total counter",
-        _g("lan_rx_drops_total", metrics.get("lan_rx_drop"), lbl),
-        "# HELP leoxgpon_lan_tx_drops_total LAN transmit drops",
-        "# TYPE leoxgpon_lan_tx_drops_total counter",
-        _g("lan_tx_drops_total", metrics.get("lan_tx_drop"), lbl),
-    ]
-    return "\n".join(line for line in lines if line) + "\n"
+    device = _prom_escape(str(metrics.get("device_name", "leoxgpon")))
+    lines = [f"# scraped {metrics.get('timestamp', '')}"]
+    for name, key, ptype, help_text in _PROM_METRICS:
+        value = metrics.get(key)
+        if value is None:
+            continue
+        lines.append(f"# HELP leoxgpon_{name} {help_text}")
+        lines.append(f"# TYPE leoxgpon_{name} {ptype}")
+        lines.append(f'leoxgpon_{name}{{device="{device}"}} {value}')
+    return "\n".join(lines) + "\n"
 
 
 def render_zabbix(metrics: dict[str, Any]) -> str:
@@ -640,7 +623,7 @@ class _MetricsHandler(BaseHTTPRequestHandler):
 
 def start_http_server(host: str, port: int) -> HTTPServer:
     """Start HTTP metrics server in a daemon thread, return server instance."""
-    server = HTTPServer((host, port), _MetricsHandler)
+    server = ThreadingHTTPServer((host, port), _MetricsHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     log.info("http metrics server listening on %s:%d", host or "0.0.0.0", port)
     return server
@@ -650,22 +633,34 @@ def start_http_server(host: str, port: int) -> HTTPServer:
 # DB interval thread
 # ---------------------------------------------------------------------------
 
-def _db_loop(conn: sqlite3.Connection, interval: int) -> None:
-    """Periodically scrape and persist to SQLite."""
-    while _running:
-        try:
-            with _scrape_lock:
-                metrics = collect_all()
-            db_insert(conn, metrics)
-            log.info("db dump: cpu=%s%% mem=%s%% rx=%sdBm tx=%sdBm",
-                     metrics.get("cpu_usage_pct"), metrics.get("memory_usage_pct"),
-                     metrics.get("rx_power_dbm"), metrics.get("tx_power_dbm"))
-        except Exception as exc:
-            log.error("db loop error: %s", exc)
-        for _ in range(interval):
-            if not _running:
-                break
-            time.sleep(1)
+def _db_loop(db_path: Path, interval: int) -> None:
+    """Periodically scrape and persist to SQLite.
+
+    Connection created here: sqlite3 objects must stay on one thread.
+    """
+    conn = sqlite3.connect(db_path)
+    db_init(conn)
+    try:
+        while _running:
+            try:
+                with _scrape_lock:
+                    metrics = collect_all()
+                db_insert(conn, metrics)
+                log.info(
+                    "db dump: cpu=%s%% mem=%s%% rx=%sdBm tx=%sdBm",
+                    metrics.get("cpu_usage_pct"),
+                    metrics.get("memory_usage_pct"),
+                    metrics.get("rx_power_dbm"),
+                    metrics.get("tx_power_dbm"),
+                )
+            except sqlite3.Error as exc:
+                log.error("db loop error: %s", exc)
+            for _ in range(interval):
+                if not _running:
+                    break
+                time.sleep(1)
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -689,7 +684,17 @@ def main() -> None:
                         help="HTTP server bind address (default: all interfaces)")
     parser.add_argument("--no-db", action="store_true",
                         help="disable SQLite persistence and interval scraping")
+    parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH,
+                        help=f"SQLite DB path (default: {DEFAULT_DB_PATH})")
+    parser.add_argument("--ont-url", type=str, default=BASE_URL,
+                        help="ONT web UI base URL")
+    parser.add_argument("--ont-user", type=str, default="leox",
+                        help="ONT basic-auth username")
+    parser.add_argument("--ont-pass", type=str, default="leolabs_7",
+                        help="ONT basic-auth password")
     args = parser.parse_args()
+
+    set_ont_config(args.ont_url, args.ont_user, args.ont_pass)
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
@@ -697,26 +702,21 @@ def main() -> None:
     if args.port:
         start_http_server(args.host, args.port)
 
-    conn: sqlite3.Connection | None = None
     db_thread: threading.Thread | None = None
-
     if not args.no_db:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
-        db_init(conn)
+        args.db.parent.mkdir(parents=True, exist_ok=True)
         db_thread = threading.Thread(
-            target=_db_loop, args=(conn, args.interval), daemon=True,
+            target=_db_loop, args=(args.db, args.interval), daemon=True,
         )
         db_thread.start()
-        log.info("db loop started, interval=%ds", args.interval)
+        log.info("db loop started, interval=%ds, db=%s",
+                 args.interval, args.db)
 
     while _running:
         time.sleep(1)
 
     if db_thread is not None:
         db_thread.join(timeout=5)
-    if conn is not None:
-        conn.close()
     log.info("scraper stopped")
 
 
