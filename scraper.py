@@ -1,12 +1,13 @@
 """GPON terminal scraper - collects metrics from LeoX ONT and exports them."""
 
+from __future__ import annotations
+
 import argparse
 import base64
 import json
 import logging
 import re
 import signal
-import sqlite3
 import threading
 import time
 import urllib.error
@@ -20,6 +21,11 @@ from http.server import (
 )
 from pathlib import Path
 from typing import Any
+
+try:
+    import sqlite3
+except ImportError:  # stripped-down python (e.g. OpenWrt without pkg)
+    sqlite3 = None  # type: ignore[assignment]
 
 # Defaults; overridable via CLI args (set in main()).
 BASE_URL = "http://192.168.100.1"
@@ -701,6 +707,10 @@ def main() -> None:
 
     if args.port:
         start_http_server(args.host, args.port)
+
+    if not args.no_db and sqlite3 is None:
+        log.warning("sqlite3 module unavailable, disabling db persistence")
+        args.no_db = True
 
     db_thread: threading.Thread | None = None
     if not args.no_db:
