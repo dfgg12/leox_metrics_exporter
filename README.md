@@ -303,7 +303,7 @@ equivalent `Architecture: all` package.
 ## Architecture
 
 ```
-             LeoX / Sagemcom ONT (192.168.100.1)
+             LeoX GPON ONT (192.168.100.1)
                   ^  HTTP Basic Auth, 6 pages
                   |
             scraper.py (stdlib-only DOM parser)
