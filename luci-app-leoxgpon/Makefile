@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 LUCI_TITLE:=LuCI interface for LeoX GPON ONT metrics
-LUCI_DEPENDS:=+luci-base +python3
+LUCI_DEPENDS:=+luci-base +python3 +python3-sqlite3 +curl
 
 PKG_NAME:=luci-app-leoxgpon
 PKG_VERSION:=1.0.0

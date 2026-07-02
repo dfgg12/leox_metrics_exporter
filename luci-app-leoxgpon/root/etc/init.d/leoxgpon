@@ -4,26 +4,35 @@ START=95
 STOP=05
 USE_PROCD=1
 
-PROG=/usr/bin/leoxgpon
+PROG=/usr/lib/leoxgpon/scraper.py
 PIDFILE=/var/run/leoxgpon.pid
+DB_PATH=/var/lib/leoxgpon/leoxgpon.db
 
 start_service() {
-	local port interval host no_db
+	local port interval host db_enabled
+	local ont_url ont_user ont_pass
 
 	config_load leoxgpon
-	config_get port    main http_port   9101
-	config_get host    main http_host   '0.0.0.0'
+	config_get port     main http_port   9101
+	config_get host     main http_host   '0.0.0.0'
 	config_get interval main db_interval 60
-	config_get_bool no_db main db_enabled 1
+	config_get_bool db_enabled main db_enabled 1
+	config_get ont_url  main ont_url  'http://192.168.100.1'
+	config_get ont_user main ont_user 'leox'
+	config_get ont_pass main ont_pass 'leolabs_7'
 
 	local db_flag=""
-	[ "$no_db" = "0" ] && db_flag="--no-db"
+	[ "$db_enabled" = "0" ] && db_flag="--no-db"
 
 	procd_open_instance
 	procd_set_param command python3 "$PROG" \
 		--port "$port" \
 		--host "$host" \
 		--interval "$interval" \
+		--db "$DB_PATH" \
+		--ont-url "$ont_url" \
+		--ont-user "$ont_user" \
+		--ont-pass "$ont_pass" \
 		$db_flag
 	procd_set_param pidfile "$PIDFILE"
 	procd_set_param respawn 3600 5 5
