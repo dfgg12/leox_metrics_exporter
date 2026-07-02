@@ -144,11 +144,19 @@ python3 scraper.py --interval 30
 
 ### Run as systemd service (Linux)
 
+The unit runs the scraper from `/opt/leoxgpon` (immutable copy, decoupled
+from the git checkout) and stores the DB in `/var/lib/leoxgpon`:
+
 ```sh
+mkdir -p /opt/leoxgpon /var/lib/leoxgpon
+cp scraper.py /opt/leoxgpon/
 cp leoxgpon-scraper.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now leoxgpon-scraper
 ```
+
+To deploy a new scraper version: `cp scraper.py /opt/leoxgpon/ &&
+systemctl restart leoxgpon-scraper`.
 
 ### Prometheus scrape config
 
@@ -174,6 +182,10 @@ The `luci-app-leoxgpon/` directory packages the scraper for OpenWrt with a
 via the LuCI backend (Lua controller proxies to port 9101), so the browser
 never needs direct access to the scraper port.
 
+The LuCI view uses only theme-native components (`cbi-section`,
+`cbi-rowstyle-*` zebra rows, `cbi-progressbar`), so it renders correctly
+in light and dark mode with the Bootstrap theme.
+
 ### Package structure
 
 ```
@@ -184,9 +196,39 @@ luci-app-leoxgpon/
   root/etc/init.d/leoxgpon             procd service script
   root/etc/config/leoxgpon             UCI default configuration
   root/usr/bin/leoxgpon                Shell shim -> python3 scraper.py
+scripts/
+  build-ipk.sh                          standalone .ipk builder (no buildroot)
 ```
 
-### Manual install
+### Recommended install: prebuilt ipk
+
+Build the package on any Linux host (no OpenWrt buildroot needed) and
+install it with opkg. This keeps every file package-owned and upgradeable:
+
+```sh
+ROUTER=192.168.1.1
+
+./scripts/build-ipk.sh
+scp -O bin/luci-app-leoxgpon_*_all.ipk root@$ROUTER:/tmp/
+ssh root@$ROUTER "opkg update && opkg install /tmp/luci-app-leoxgpon_*_all.ipk"
+```
+
+The package:
+- depends on `luci-base`, `python3`, `python3-sqlite3`, `curl`
+  (opkg installs them automatically)
+- marks `/etc/config/leoxgpon` as a conffile - your edited config survives
+  upgrades (the pristine default lands next to it as `leoxgpon-opkg`)
+- enables and starts the service and clears the LuCI cache on install
+- stops and disables the service on removal
+
+Upgrades: bump `PKG_RELEASE` in `luci-app-leoxgpon/Makefile`, rebuild,
+`opkg install` the new ipk.
+
+Open LuCI in the browser. **Status > GPON Status** will appear.
+
+### Manual install (development)
+
+For quick iteration without packaging, copy files directly:
 
 ```sh
 ROUTER=192.168.1.1
@@ -211,7 +253,9 @@ ssh root@$ROUTER "/etc/init.d/leoxgpon enable && /etc/init.d/leoxgpon start"
 ssh root@$ROUTER "rm -rf /tmp/luci-indexcache /tmp/luci-modulecache"
 ```
 
-Open LuCI in the browser. **Status > GPON Status** will appear.
+Note: manually copied files are invisible to opkg; prefer the ipk for
+anything long-lived. Router lacking `sftp-server` needs the `scp -O`
+(legacy protocol) flag shown above.
 
 ### UCI configuration
 
@@ -239,7 +283,10 @@ uci commit leoxgpon
 /etc/init.d/leoxgpon reload
 ```
 
-### Building as an OpenWrt package
+### Building with the OpenWrt buildroot (alternative)
+
+If you already run a full OpenWrt build system, the package Makefile is
+buildroot-compatible:
 
 ```sh
 # In feeds.conf
@@ -249,6 +296,49 @@ src-git leoxgpon https://github.com/yourrepo/leoxgpon.git
 ./scripts/feeds install luci-app-leoxgpon
 make package/luci-app-leoxgpon/compile
 ```
+
+For everything else `scripts/build-ipk.sh` is simpler and produces an
+equivalent `Architecture: all` package.
+
+## Architecture
+
+```
+             LeoX / Sagemcom ONT (192.168.100.1)
+                  ^  HTTP Basic Auth, 6 pages
+                  |
+            scraper.py (stdlib-only DOM parser)
+             |            |             |
+   HTTP :9101       SQLite thread   optional file exports
+   live scrape      (60s interval)  (metrics.json/.prom, zabbix.json)
+   per request
+     |    \
+Prometheus  LuCI Lua controller (curl proxy)
+Zabbix           |
+Grafana     Status > GPON Status page
+```
+
+- One scrape lock serializes all ONT access - the device CPU is weak and
+  concurrent scrapes would skew its own CPU metric.
+- The HTTP server is threaded, so `/health` responds even while a slow
+  ONT scrape is in progress.
+- The SQLite connection lives entirely inside the DB thread
+  (sqlite3 objects are not thread-safe across threads).
+- On OpenWrt the DB sits on tmpfs (`/var/lib` -> `/tmp`): no flash wear,
+  history resets on reboot. On plain Linux `/var/lib/leoxgpon` is
+  persistent.
+
+## Troubleshooting
+
+- No data in LuCI tab: check `logread | grep leoxgpon` and
+  `curl http://127.0.0.1:9101/health` on the router.
+- `ModuleNotFoundError: sqlite3`: install `python3-sqlite3`; without it
+  the scraper still serves HTTP but skips DB persistence (logs a warning).
+- Empty metrics: verify ONT reachability and credentials with
+  `curl -u leox:leolabs_7 http://192.168.100.1/status.asp`.
+- LuCI tab missing after install: clear the cache -
+  `rm -rf /tmp/luci-indexcache /tmp/luci-modulecache`.
+- Gaps in Grafana: the exporter scrapes live per request; a scrape takes
+  up to a few seconds. Set the Prometheus `scrape_timeout` to 15s or more.
 
 ## Credentials
 
