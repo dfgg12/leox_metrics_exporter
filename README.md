@@ -2,7 +2,16 @@
 
 Scraper service for LeoX GPON ONT devices. Polls the ONT web interface and
 exposes metrics over HTTP in Prometheus, JSON, and Zabbix formats, with
-optional SQLite persistence.
+optional SQLite persistence and file exports.
+
+Runs on plain Linux (systemd) or on OpenWrt with a built-in LuCI status tab
+(`luci-app-leoxgpon` package).
+
+Highlights:
+- Zero third-party Python dependencies - stdlib only (`urllib`, `html.parser`)
+- Live scrape per HTTP request, serialized to avoid hammering the ONT
+- Background SQLite persistence at a configurable interval
+- OpenWrt: procd-managed service reading config from UCI, LuCI dashboard
 
 ## Metrics collected
 
@@ -95,7 +104,10 @@ Default port: **9101**.
 ## SQLite persistence
 
 When DB mode is enabled (default), a background thread scrapes the ONT at a
-configurable interval and inserts rows into `data/leoxgpon.db`.
+configurable interval and inserts rows into the DB (default
+`data/leoxgpon.db`, override with `--db`). Each dump also writes
+`metrics.json`, `metrics.prom`, and `zabbix.json` files to `data/` unless
+`--no-files` is given.
 
 Tables:
 - `metrics` - one row per scrape, all scalar fields
@@ -103,13 +115,9 @@ Tables:
 
 ## Requirements
 
-- Python 3.11+
-- `requests`
-- `beautifulsoup4`
-
-```
-pip install requests beautifulsoup4
-```
+- Python 3.11+ (stdlib only, no pip packages)
+- On OpenWrt: `python3` and `python3-sqlite3` packages (without
+  `python3-sqlite3` the scraper still runs, DB persistence auto-disables)
 
 ## Usage
 
@@ -122,6 +130,10 @@ Options:
   --interval INT  SQLite dump interval in seconds (default: 60)
   --no-db         Disable SQLite persistence
   --no-files      Skip writing metric files to disk on each DB dump
+  --db PATH       SQLite DB path (default: data/leoxgpon.db)
+  --ont-url URL   ONT web UI base URL (default: http://192.168.100.1)
+  --ont-user STR  ONT basic-auth username (default: leox)
+  --ont-pass STR  ONT basic-auth password (default: leolabs_7)
 ```
 
 ### Run directly
@@ -130,7 +142,7 @@ Options:
 python3 scraper.py --interval 30
 ```
 
-### Run as systemd service
+### Run as systemd service (Linux)
 
 ```sh
 cp leoxgpon-scraper.service /etc/systemd/system/
@@ -155,11 +167,90 @@ scrape_configs:
 curl -sf http://localhost:9101/zabbix.json | zabbix_sender -z <zabbix-server> -i -
 ```
 
+## OpenWrt / LuCI
+
+The `luci-app-leoxgpon/` directory packages the scraper for OpenWrt with a
+**Status > GPON Status** LuCI tab (30-second auto-refresh). Data is fetched
+via the LuCI backend (Lua controller proxies to port 9101), so the browser
+never needs direct access to the scraper port.
+
+### Package structure
+
+```
+luci-app-leoxgpon/
+  Makefile                              OpenWrt build system entry point
+  luasrc/controller/leoxgpon.lua        LuCI menu registration + /data proxy
+  luasrc/view/leoxgpon/status.htm       HTML/JS dashboard view
+  root/etc/init.d/leoxgpon             procd service script
+  root/etc/config/leoxgpon             UCI default configuration
+  root/usr/bin/leoxgpon                Shell shim -> python3 scraper.py
+```
+
+### Manual install
+
+```sh
+ROUTER=192.168.1.1
+
+ssh root@$ROUTER "opkg update && opkg install python3 python3-sqlite3"
+ssh root@$ROUTER mkdir -p /usr/lib/leoxgpon /usr/lib/lua/luci/view/leoxgpon
+
+scp -O scraper.py root@$ROUTER:/usr/lib/leoxgpon/scraper.py
+scp -O luci-app-leoxgpon/luasrc/controller/leoxgpon.lua \
+    root@$ROUTER:/usr/lib/lua/luci/controller/leoxgpon.lua
+scp -O luci-app-leoxgpon/luasrc/view/leoxgpon/status.htm \
+    root@$ROUTER:/usr/lib/lua/luci/view/leoxgpon/status.htm
+scp -O luci-app-leoxgpon/root/etc/init.d/leoxgpon \
+    root@$ROUTER:/etc/init.d/leoxgpon
+scp -O luci-app-leoxgpon/root/etc/config/leoxgpon \
+    root@$ROUTER:/etc/config/leoxgpon
+scp -O luci-app-leoxgpon/root/usr/bin/leoxgpon \
+    root@$ROUTER:/usr/bin/leoxgpon
+
+ssh root@$ROUTER "chmod +x /etc/init.d/leoxgpon /usr/bin/leoxgpon"
+ssh root@$ROUTER "/etc/init.d/leoxgpon enable && /etc/init.d/leoxgpon start"
+ssh root@$ROUTER "rm -rf /tmp/luci-indexcache /tmp/luci-modulecache"
+```
+
+Open LuCI in the browser. **Status > GPON Status** will appear.
+
+### UCI configuration
+
+Settings live in `/etc/config/leoxgpon`:
+
+```
+config leoxgpon 'main'
+    option ont_url      'http://192.168.100.1'   # ONT address
+    option ont_user     'leox'                    # HTTP Basic Auth user
+    option ont_pass     'leolabs_7'               # HTTP Basic Auth password
+    option http_port    '9101'                    # metrics HTTP port
+    option http_host    '0.0.0.0'                 # bind address
+    option db_interval  '60'                      # SQLite dump interval (s)
+    option db_enabled   '1'                       # 0 to disable SQLite
+```
+
+The init script passes these to the scraper; the DB is written to
+`/var/lib/leoxgpon/leoxgpon.db` (tmpfs, avoids flash wear).
+
+Edit with `uci` or directly, then reload:
+
+```sh
+uci set leoxgpon.main.db_interval=30
+uci commit leoxgpon
+/etc/init.d/leoxgpon reload
+```
+
+### Building as an OpenWrt package
+
+```sh
+# In feeds.conf
+src-git leoxgpon https://github.com/yourrepo/leoxgpon.git
+
+./scripts/feeds update leoxgpon
+./scripts/feeds install luci-app-leoxgpon
+make package/luci-app-leoxgpon/compile
+```
+
 ## Credentials
 
-ONT address and credentials are hardcoded at the top of `scraper.py`:
-
-```python
-BASE_URL = "http://192.168.100.1"
-AUTH = ("leox", "leolabs_7")
-```
+ONT address and credentials default to the LeoX factory values
+(`leox` / `leolabs_7`); override with `--ont-*` flags or UCI options.
