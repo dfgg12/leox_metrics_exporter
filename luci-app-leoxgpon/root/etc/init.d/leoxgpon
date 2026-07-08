@@ -30,6 +30,7 @@ start_service() {
 		--host "$host" \
 		--interval "$interval" \
 		--db "$DB_PATH" \
+		--no-files \
 		--ont-url "$ont_url" \
 		--ont-user "$ont_user" \
 		--ont-pass "$ont_pass" \
