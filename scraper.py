@@ -27,7 +27,8 @@ try:
 except ImportError:  # stripped-down python (e.g. OpenWrt without pkg)
     sqlite3 = None  # type: ignore[assignment]
 
-# Defaults; overridable via CLI args (set in main()).
+# BASE_URL is overridable via --ont-url (applied in main() through
+# set_ont_config); TIMEOUT is the fixed per-request fetch timeout in seconds.
 BASE_URL = "http://192.168.100.1"
 TIMEOUT = 10
 
@@ -325,7 +326,7 @@ def scrape_gpon() -> dict[str, Any]:
             if td:
                 serial = td.get_text()
     loid_input = root.find("input", name="fmgpon_loid")
-    loid = loid_input["value"] if loid_input else ""
+    loid = loid_input.attrs.get("value", "") if loid_input else ""
     return {"gpon_serial": serial, "gpon_loid": loid}
 
 
@@ -411,28 +412,29 @@ _SCALAR_KEYS = [
     "wan_conn_type", "wan_protocol", "wan_ip", "wan_gateway", "wan_status",
 ]
 
-_MIGRATIONS = [
-    "ALTER TABLE metrics ADD COLUMN name_servers TEXT",
-    "ALTER TABLE metrics ADD COLUMN ipv4_default_gw TEXT",
-    "ALTER TABLE metrics ADD COLUMN ipv6_default_gw TEXT",
-    "ALTER TABLE metrics ADD COLUMN wan_interface TEXT",
-    "ALTER TABLE metrics ADD COLUMN wan_vlan_id INTEGER",
-    "ALTER TABLE metrics ADD COLUMN wan_conn_type TEXT",
-    "ALTER TABLE metrics ADD COLUMN wan_protocol TEXT",
-    "ALTER TABLE metrics ADD COLUMN wan_ip TEXT",
-    "ALTER TABLE metrics ADD COLUMN wan_gateway TEXT",
-    "ALTER TABLE metrics ADD COLUMN wan_status TEXT",
+# Columns added after the original schema baseline. Present in _DDL for fresh
+# DBs; re-added here only for DBs created by older versions that predate them.
+_MIGRATION_COLUMNS: list[tuple[str, str]] = [
+    ("name_servers", "TEXT"),
+    ("ipv4_default_gw", "TEXT"),
+    ("ipv6_default_gw", "TEXT"),
+    ("wan_interface", "TEXT"),
+    ("wan_vlan_id", "INTEGER"),
+    ("wan_conn_type", "TEXT"),
+    ("wan_protocol", "TEXT"),
+    ("wan_ip", "TEXT"),
+    ("wan_gateway", "TEXT"),
+    ("wan_status", "TEXT"),
 ]
 
 
 def db_init(conn: sqlite3.Connection) -> None:
-    """Initialize DB schema and apply pending migrations."""
+    """Create schema and add any migration columns missing from an old DB."""
     conn.executescript(_DDL)
-    for stmt in _MIGRATIONS:
-        try:
-            conn.execute(stmt)
-        except sqlite3.OperationalError:
-            pass
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(metrics)")}
+    for column, col_type in _MIGRATION_COLUMNS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE metrics ADD COLUMN {column} {col_type}")
     conn.commit()
 
 
@@ -465,7 +467,7 @@ _PROM_METRICS: list[tuple[str, str, str, str]] = [
      "CPU utilization percent"),
     ("memory_usage_pct", "memory_usage_pct", "gauge",
      "Memory utilization percent"),
-    ("uptime_seconds", "uptime_seconds", "counter",
+    ("uptime_seconds", "uptime_seconds", "gauge",
      "Device uptime in seconds"),
     ("temperature_celsius", "temperature_c", "gauge",
      "Optical module temperature"),
@@ -529,7 +531,7 @@ def _prom_escape(val: str) -> str:
 
 def render_prometheus(metrics: dict[str, Any]) -> str:
     """Render Prometheus text exposition format string."""
-    device = _prom_escape(str(metrics.get("device_name", "leoxgpon")))
+    device = _prom_escape(str(metrics.get("device_name") or "leoxgpon"))
     lines = [f"# scraped {metrics.get('timestamp', '')}"]
     for name, key, ptype, help_text in _PROM_METRICS:
         value = metrics.get(key)
@@ -672,7 +674,10 @@ def _db_loop(db_path: Path, interval: int, write_files: bool) -> None:
                 tx = metrics.get("tx_power_dbm")
                 log.info("db dump: cpu=%s%% mem=%s%% rx=%sdBm tx=%sdBm",
                          cpu, mem, rx, tx)
-            except (OSError, ValueError, sqlite3.Error) as exc:
+            # Broad catch: this daemon's sole job is uninterrupted
+            # persistence; a single malformed field or ONT parser drift must
+            # not terminate the loop and silently stop history collection.
+            except Exception as exc:  # pylint: disable=broad-except
                 log.error("db loop error: %s", exc)
             _STOP_EVENT.wait(timeout=interval)
     finally:
