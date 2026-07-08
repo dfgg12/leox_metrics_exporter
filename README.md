@@ -78,6 +78,13 @@ hammering the device).
 
 Default port: **9101**.
 
+> The metrics endpoints are unauthenticated and expose device details
+> (GPON serial, LOID, ARP table). On a router the LuCI proxy reaches them
+> over `127.0.0.1`, so you can set `http_host '127.0.0.1'` to keep port
+> 9101 off the LAN entirely. Leave the default `0.0.0.0` only when a
+> remote Prometheus/Zabbix must scrape it, and firewall the port to
+> trusted collectors.
+
 ### JSON example (abbreviated)
 
 ```json
@@ -272,7 +279,9 @@ config leoxgpon 'main'
     option db_enabled   '1'                       # 0 to disable SQLite
 ```
 
-The init script passes these to the scraper; the DB is written to
+The init script passes these to the scraper (with `--no-files`, since the
+DB lives on tmpfs and LuCI reads metrics over live HTTP, so the file
+exports are unused on-router); the DB is written to
 `/var/lib/leoxgpon/leoxgpon.db` (tmpfs, avoids flash wear).
 
 Edit with `uci` or directly, then reload:
