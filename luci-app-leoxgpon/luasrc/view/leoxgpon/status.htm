@@ -29,7 +29,8 @@
            value="Refresh" onclick="gponFetch()" />
   </div>
 
-  <div id="gpon-err" class="alert-message warning" style="display:none"></div>
+  <div id="gpon-err" class="alert-message warning" role="alert"
+       style="display:none"></div>
 
   <!-- Device -->
   <fieldset class="cbi-section">
@@ -40,12 +41,16 @@
         <tr class="cbi-rowstyle-2"><td>Firmware</td><td><span id="g-firmware_version">-</span></td></tr>
         <tr class="cbi-rowstyle-1"><td>Uptime</td><td><span id="g-uptime_raw">-</span></td></tr>
         <tr class="cbi-rowstyle-2"><td>CPU</td><td>
-              <div class="cbi-progressbar" id="g-cpu-bar" title="-">
+              <div class="cbi-progressbar" id="g-cpu-bar" title="-"
+                   role="progressbar" aria-label="CPU usage"
+                   aria-valuemin="0" aria-valuemax="100">
                 <div></div>
               </div>
             </td></tr>
         <tr class="cbi-rowstyle-1"><td>Memory</td><td>
-              <div class="cbi-progressbar" id="g-mem-bar" title="-">
+              <div class="cbi-progressbar" id="g-mem-bar" title="-"
+                   role="progressbar" aria-label="Memory usage"
+                   aria-valuemin="0" aria-valuemax="100">
                 <div></div>
               </div>
             </td></tr>
@@ -210,16 +215,20 @@
     var inner = el.firstElementChild;
     if (pct === null || pct === undefined) {
       el.title = "-";
+      el.removeAttribute("aria-valuenow");
+      el.setAttribute("aria-valuetext", "unknown");
       if (inner) inner.style.width = "0%";
       return;
     }
     var p = Math.min(100, Math.max(0, pct));
     el.title = p + "%";
+    el.setAttribute("aria-valuenow", p);
+    el.setAttribute("aria-valuetext", p + "%");
     if (inner) inner.style.width = p + "%";
   }
 
   function badge(text, cls) {
-    return '<span class="label label-' + cls + '">' + (text || "-") + '</span>';
+    return '<span class="label label-' + cls + '">' + esc(text || "-") + '</span>';
   }
 
   function setHTML(id, html) {
@@ -364,7 +373,12 @@
   window.gponFetch = gponFetch;
 
   gponFetch();
-  _timer = setInterval(gponFetch, POLL_MS);
+  _timer = setInterval(function() {
+    if (!document.hidden) gponFetch();
+  }, POLL_MS);
+  window.addEventListener("beforeunload", function() {
+    if (_timer) { clearInterval(_timer); _timer = null; }
+  });
 })();
 </script>
 

@@ -10,6 +10,7 @@ end
 function action_data()
 	local uci  = require "luci.model.uci".cursor()
 	local port = uci:get("leoxgpon", "main", "http_port") or "9101"
+	if not tostring(port):match("^%d+$") then port = "9101" end
 	local url  = "http://127.0.0.1:" .. port .. "/metrics.json"
 
 	local result = luci.sys.exec(
