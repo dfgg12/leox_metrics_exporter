@@ -13,6 +13,9 @@ Highlights:
 - Background SQLite persistence at a configurable interval
 - OpenWrt: procd-managed service reading config from UCI, LuCI dashboard
 
+Current release: **1.0.0-4** (see [CHANGELOG.md](CHANGELOG.md)). Planned
+work is tracked in [ROADMAP.md](ROADMAP.md).
+
 ## Metrics collected
 
 ### Device
@@ -174,6 +177,10 @@ scrape_configs:
       - targets: ["<host>:9101"]
     metrics_path: /metrics
 ```
+
+`leoxgpon_uptime_seconds` is a gauge (it resets to 0 on reboot); every
+`*_total` metric is a cumulative counter intended for `rate()` /
+`increase()`.
 
 ### Zabbix sender
 
